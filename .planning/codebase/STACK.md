@@ -47,7 +47,7 @@
 - `beautifulsoup4==4.12.3` - Parses tour-price HTML in `parse_offers()`, `extract_hotel_name()`, and `extract_external_hotel_name()` inside `price_monitor/monitor.py`.
 
 **Infrastructure:**
-- Docker named volume `bg-price-monitor-data` - Persists `/data/last_snapshot.json`, `/data/price_history.json`, and `/data/settings.json` as configured by `docker-compose.yml` and `price_monitor/monitor.py`.
+- Docker named volume `bg-price-monitor-data` - Persists `/data/price_monitor.sqlite3` as the normal runtime database. Legacy JSON files under `/data` remain migration inputs.
 - Python logging module - Writes service logs to stdout through `configure_logging()` in `price_monitor/monitor.py`.
 - Python threading module - Runs the Telegram control bot as a daemon thread through `TelegramControlBot.start()` in `price_monitor/monitor.py`.
 
@@ -58,8 +58,8 @@
 - Docker Compose injects environment variables in `docker-compose.yml`.
 - `.env` file present - contains local environment configuration and must not be read or committed with secret values.
 - `.env.example` file present - template environment file; do not treat example values as production secrets.
-- Supported environment variables in `price_monitor/monitor.py`: `BG_MONITOR_URL`, `BG_DEPARTURE_FROM`, `BG_DEPARTURE_TO`, `BG_NIGHTS`, `BG_ROOM_FILTERS`, `BG_ROOM_CONTAINS`, `BG_CHECK_INTERVAL_SECONDS`, `BG_RUN_ONCE`, `BG_STATE_PATH`, `BG_SETTINGS_PATH`, `BG_STRONG_DIFF_RUB`, `BG_STRONG_DIFF_PERCENT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `BG_TARGET_PRICE`, and `BG_HISTORY_PATH`.
-- Runtime settings can override selected env-derived values through JSON at `BG_SETTINGS_PATH`, defaulting to `/data/settings.json`.
+- Supported environment variables in `price_monitor/monitor.py`: `BG_MONITOR_URL`, `BG_DEPARTURE_FROM`, `BG_DEPARTURE_TO`, `BG_NIGHTS`, `BG_ROOM_FILTERS`, `BG_ROOM_CONTAINS`, `BG_CHECK_INTERVAL_SECONDS`, `BG_RUN_ONCE`, `BG_DB_PATH`, `BG_STATE_PATH`, `BG_SETTINGS_PATH`, `BG_STRONG_DIFF_RUB`, `BG_STRONG_DIFF_PERCENT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `BG_TARGET_PRICE`, and `BG_HISTORY_PATH`.
+- Runtime settings can override selected env-derived values through SQLite at `BG_DB_PATH`, defaulting to `/data/price_monitor.sqlite3`. `BG_SETTINGS_PATH`, `BG_STATE_PATH`, and `BG_HISTORY_PATH` are legacy JSON migration inputs.
 
 **Build:**
 - `docker/price-monitor/Dockerfile` sets `WORKDIR /app`, installs `price_monitor/requirements.txt`, copies `price_monitor/`, sets `PYTHONUNBUFFERED=1`, and runs `python -m price_monitor.monitor`.

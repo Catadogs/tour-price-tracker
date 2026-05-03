@@ -9,7 +9,7 @@
 **Key Characteristics:**
 - Keep application behavior in `price_monitor/monitor.py`; this module is both the library surface used by tests and the executable entry point run by Docker.
 - Use immutable dataclasses in `price_monitor/monitor.py` for core data structures: `Offer`, `MonitorConfig`, `SearchTarget`, and `ExternalPrice`.
-- Use JSON files for durable state and runtime settings through `load_snapshot`, `save_snapshot`, `load_price_history`, `save_price_history`, `load_runtime_settings`, and `save_runtime_settings` in `price_monitor/monitor.py`.
+- Use SQLite for normal-runtime durable state through `price_monitor/storage.py`, with thin wrappers in `price_monitor/monitor.py` for settings, latest snapshots, and append-only price history.
 - Use synchronous HTTP requests through `requests` in `price_monitor/monitor.py`; there is no async framework, web server, database layer, or job queue.
 - Run Telegram polling in a background `threading.Thread` from `TelegramControlBot.start` while the main loop performs scheduled checks.
 
@@ -19,7 +19,7 @@
 - Purpose: Convert environment variables and Telegram-edited runtime settings into an effective monitor configuration.
 - Location: `price_monitor/monitor.py`
 - Contains: `MonitorConfig.from_env`, `parse_nights`, `parse_filters`, `load_runtime_settings`, `save_runtime_settings`, `effective_config`, `parse_date_range_text`, `parse_diff_text`, and `parse_interval_text`.
-- Depends on: `os.getenv`, `pathlib.Path`, `json`, and parsing helpers in `price_monitor/monitor.py`.
+- Depends on: `os.getenv`, `pathlib.Path`, SQLite-backed storage wrappers, and parsing helpers in `price_monitor/monitor.py`.
 - Used by: `main`, `run_check`, `TelegramControlBot`, `format_settings`, and tests in `tests/test_price_monitor.py`.
 
 **Fetching Layer:**
@@ -40,14 +40,14 @@
 - Purpose: Filter offers, choose best prices, compute differences, detect changes, track historical minimums, and build alert text.
 - Location: `price_monitor/monitor.py`
 - Contains: `filter_offers`, `best_by_departure_and_nights`, `find_overall_best`, `snapshot`, `format_changes`, `update_price_history`, `historical_min_price`, `compute_trend`, `format_new_minimums`, `format_target_alerts`, `format_strong_diff_line`, and `adaptive_interval`.
-- Depends on: `Offer`, `MonitorConfig`, `datetime`, and JSON-backed state loaded from disk.
+- Depends on: `Offer`, `MonitorConfig`, `datetime`, and SQLite-backed state loaded through monitor persistence wrappers.
 - Used by: `run_check` and tests in `tests/test_price_monitor.py`.
 
 **Persistence Layer:**
 - Purpose: Store last observed prices, historical price series, and Telegram-defined runtime settings.
-- Location: `price_monitor/monitor.py`
-- Contains: `load_snapshot`, `save_snapshot`, `load_price_history`, `save_price_history`, `load_runtime_settings`, and `save_runtime_settings`.
-- Depends on: `Path.read_text`, `Path.write_text`, `Path.mkdir`, and `json`.
+- Location: `price_monitor/storage.py` with caller-facing wrappers in `price_monitor/monitor.py`.
+- Contains: `initialize_storage`, `load_snapshot`, `save_snapshot`, `load_price_history`, `append_price_history`, `load_runtime_settings`, and `save_runtime_settings`.
+- Depends on: Python stdlib `sqlite3`, `pathlib.Path`, JSON payload serialization, and `MonitorConfig.db_path`.
 - Used by: `run_check`, `effective_config`, `load_search_targets`, and `TelegramControlBot.apply_pending_action`.
 
 **Notification and Control Layer:**
@@ -68,15 +68,15 @@
 
 **Scheduled Price Check:**
 
-1. `main` in `price_monitor/monitor.py` calls `configure_logging`, creates `MonitorConfig.from_env`, starts `TelegramControlBot`, and enters the check loop.
-2. `run_check` calls `effective_config` to merge `.env`-backed configuration with runtime settings from `settings_path`.
+1. `main` in `price_monitor/monitor.py` calls `configure_logging`, creates `MonitorConfig.from_env`, initializes SQLite storage, starts `TelegramControlBot`, and enters the check loop.
+2. `run_check` calls `effective_config` to merge `.env`-backed configuration with runtime settings from SQLite.
 3. `load_search_targets` returns the primary configured URL plus any Telegram-added searches from runtime settings.
 4. Each `SearchTarget.url` is fetched by `fetch_html`.
 5. Biblio-Globus URLs flow through `parse_offers`, `filter_offers`, `best_by_departure_and_nights`, `format_report`, and `snapshot`.
 6. Level.Travel, Travelata, and other supported non-Biblio-Globus URLs flow through `parse_external_price` and `format_external_report`.
 7. `run_check` reads previous state with `load_snapshot` and price history with `load_price_history`.
 8. `format_changes`, `format_new_minimums`, and `format_target_alerts` generate alert sections.
-9. `update_price_history`, `save_price_history`, and `save_snapshot` persist current state before `run_check` returns the full message.
+9. `append_price_history` and `save_snapshot` persist current state to SQLite before `run_check` returns the full message.
 10. `main` sends the returned message via `send_telegram`, then sleeps for `adaptive_interval`.
 
 **Telegram Manual Check:**
@@ -92,14 +92,15 @@
 1. Inline callbacks in `TelegramControlBot.handle_callback` set a pending action in `TelegramControlBot.pending`.
 2. The next text message for that chat is processed by `TelegramControlBot.apply_pending_action`.
 3. The action validates input with helpers such as `normalize_search_url`, `parse_date_range_text`, `parse_nights`, `parse_diff_text`, and `parse_interval_text`.
-4. Updated values are written through `save_runtime_settings` to `MonitorConfig.settings_path`.
+4. Updated values are written through `save_runtime_settings` to SQLite at `MonitorConfig.db_path`.
 5. Future scheduled and manual checks use `effective_config` and `load_search_targets` to apply the saved runtime settings.
 
 **State Management:**
 - Static configuration comes from environment variables in `MonitorConfig.from_env` inside `price_monitor/monitor.py`; `.env` is present at the project root and is consumed by Docker Compose without being committed into architecture docs.
-- Runtime settings are JSON data at `MonitorConfig.settings_path`, defaulting to `/data/settings.json` in container execution.
-- Last-check snapshots are JSON data at `MonitorConfig.state_path`, defaulting to `/data/last_snapshot.json`.
-- Historical price points are JSON data at `MonitorConfig.history_path`, defaulting to `/data/price_history.json`.
+- Runtime settings are SQLite rows at `MonitorConfig.db_path`, defaulting to `/data/price_monitor.sqlite3` in container execution.
+- Latest snapshots are SQLite rows loaded and saved through `load_snapshot(config)` and `save_snapshot(config, data)`.
+- Historical price points are append-only SQLite rows loaded through `load_price_history(config)` and appended through `append_price_history(config, snapshot, observed_at)`.
+- `MonitorConfig.settings_path`, `state_path`, and `history_path` remain as one-time legacy JSON migration inputs during storage initialization.
 - In-memory Telegram conversation state lives in `TelegramControlBot.pending` and is not persisted.
 
 ## Key Abstractions

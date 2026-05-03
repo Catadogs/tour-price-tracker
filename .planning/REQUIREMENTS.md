@@ -60,7 +60,7 @@
 
 ### Quality
 
-- [ ] **QUAL-01**: Existing tests pass with the current `MonitorConfig` shape.
+- [x] **QUAL-01**: Existing tests pass with the current `MonitorConfig` shape.
 - [x] **QUAL-02**: SQLite storage has focused tests for initialization, settings persistence, snapshot persistence, and price history writes.
 - [ ] **QUAL-03**: Anomaly detection has focused tests for same-date duration comparisons and threshold handling.
 - [ ] **QUAL-04**: Currency monitoring has focused tests for rate movement calculations and alert formatting.
@@ -112,7 +112,7 @@
 | OPS-02 | Phase 1 | Complete |
 | OPS-03 | Phase 1 | Complete |
 | OPS-04 | Phase 1 | Complete |
-| QUAL-01 | Phase 1 | Pending |
+| QUAL-01 | Phase 1 | Complete |
 | QUAL-02 | Phase 1 | Complete |
 | TG-01 | Phase 2 | Pending |
 | TG-02 | Phase 2 | Pending |

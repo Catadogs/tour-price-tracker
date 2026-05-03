@@ -90,7 +90,7 @@
 
 **Parameters:** Use typed parameters and concrete domain objects.
 - Pass `MonitorConfig` into functions that need runtime settings, as in `filter_offers`, `format_report`, `send_telegram`, and `run_check` in `price_monitor/monitor.py`.
-- Pass `Path` objects for filesystem operations, as in `load_snapshot`, `save_snapshot`, `load_price_history`, and `save_price_history` in `price_monitor/monitor.py`.
+- Pass `MonitorConfig` into persistence wrappers that use SQLite state, as in `load_snapshot(config)`, `save_snapshot(config, data)`, `load_price_history(config)`, and `append_price_history(config, snapshot, observed_at)` in `price_monitor/monitor.py`.
 - Use `Iterable[Offer]` for functions that only iterate offers, as in `filter_offers` and `best_by_departure_and_nights` in `price_monitor/monitor.py`.
 
 **Return Values:** Return typed domain structures.

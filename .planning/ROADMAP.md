@@ -12,7 +12,7 @@ This roadmap turns the existing Dockerized Python price monitor into a durable p
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: SQLite State and Single-Container Foundation** - Runtime state moves from JSON to SQLite while the service remains a one-container monolith.
+- [x] **Phase 1: SQLite State and Single-Container Foundation** - Runtime state moves from JSON to SQLite while the service remains a one-container monolith.
 - [ ] **Phase 2: Admin Telegram Control UI and Authorization** - The admin can safely manage tracking settings from Telegram, and unauthorized chats are blocked.
 - [ ] **Phase 3: Price Tracking Summaries and Target Alerts** - Scheduled and manual checks produce readable best-price summaries and immediate target-price alerts.
 - [ ] **Phase 4: Duration Anomaly Analytics** - Same-date night-duration comparisons highlight longer-cheaper and better-value tour options.
@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 3 plans
 Plans:
 - [x] 01-01-PLAN.md - Create SQLite storage schema, one-time JSON migration, persistence operations, and corruption fallback.
-- [ ] 01-02-PLAN.md - Wire monitor runtime settings, snapshots, and price history to SQLite.
+- [x] 01-02-PLAN.md - Wire monitor runtime settings, snapshots, and price history to SQLite.
 - [x] 01-03-PLAN.md - Add Docker and documentation wiring for the SQLite database path.
 
 ### Phase 2: Admin Telegram Control UI and Authorization
@@ -93,7 +93,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. SQLite State and Single-Container Foundation | 1/3 | In Progress | - |
+| 1. SQLite State and Single-Container Foundation | 3/3 | Complete | 2026-05-03 |
 | 2. Admin Telegram Control UI and Authorization | 0/TBD | Not started | - |
 | 3. Price Tracking Summaries and Target Alerts | 0/TBD | Not started | - |
 | 4. Duration Anomaly Analytics | 0/TBD | Not started | - |
