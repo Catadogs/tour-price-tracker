@@ -1,0 +1,29 @@
+services:
+  bg-price-monitor:
+    build:
+      context: .
+      dockerfile: docker/price-monitor/Dockerfile
+    image: bg-price-monitor:latest
+    container_name: bg-price-monitor
+    restart: unless-stopped
+    environment:
+      BG_MONITOR_URL: ${BG_MONITOR_URL:-}
+      BG_DEPARTURE_FROM: ${BG_DEPARTURE_FROM:-14.09.2026}
+      BG_DEPARTURE_TO: ${BG_DEPARTURE_TO:-17.09.2026}
+      BG_NIGHTS: ${BG_NIGHTS:-12,13}
+      BG_ROOM_CONTAINS: ${BG_ROOM_CONTAINS:-}
+      BG_CHECK_INTERVAL_SECONDS: ${BG_CHECK_INTERVAL_SECONDS:-21600}
+      BG_STRONG_DIFF_RUB: ${BG_STRONG_DIFF_RUB:-20000}
+      BG_STRONG_DIFF_PERCENT: ${BG_STRONG_DIFF_PERCENT:-7}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      BG_TARGET_PRICE: ${BG_TARGET_PRICE:-}
+      BG_DB_PATH: ${BG_DB_PATH:-/data/price_monitor.sqlite3}
+      BG_SETTINGS_PATH: /data/settings.json
+      BG_STATE_PATH: /data/last_snapshot.json
+      BG_HISTORY_PATH: /data/price_history.json
+    volumes:
+      - bg-price-monitor-data:/data
+
+volumes:
+  bg-price-monitor-data:
