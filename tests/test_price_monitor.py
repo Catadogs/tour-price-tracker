@@ -18,6 +18,7 @@ from price_monitor.monitor import (
     parse_interval_text,
     normalize_search_url,
     parse_offers,
+    run_check,
     save_runtime_settings,
     save_snapshot,
 )
@@ -231,3 +232,53 @@ def test_monitor_storage_wrappers_use_sqlite(tmp_path: Path):
     assert load_price_history(config) == {}
     assert not config.settings_path.exists()
     assert not config.state_path.exists()
+
+
+def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monkeypatch):
+    html = """
+    <table>
+      <tr>
+        <td class="c_ns">Room A</td>
+        <td class="c_pe">
+          <b class=r>180000</b>
+          <a href="/zaya?dt=14.09.2026&kol=12&otn=a" title="2200 USD">Buy</a>
+        </td>
+      </tr>
+    </table>
+    """
+    config = MonitorConfig(
+        url="https://www.bgoperator.ru/price.shtml?action=price",
+        departure_from="14.09.2026",
+        departure_to="17.09.2026",
+        nights=(12,),
+        room_filters=(),
+        interval_seconds=1,
+        run_once=True,
+        db_path=tmp_path / "price_monitor.sqlite3",
+        state_path=tmp_path / "state.json",
+        settings_path=tmp_path / "settings.json",
+        strong_diff_rub=20000,
+        strong_diff_percent=7,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        target_price_rub=None,
+        history_path=tmp_path / "price_history.json",
+    )
+    monkeypatch.setattr("price_monitor.monitor.fetch_html", lambda url: html)
+
+    initialize_storage(config)
+    run_check(config)
+
+    persisted_snapshot = load_snapshot(config)
+    persisted_history = load_price_history(config)
+
+    assert persisted_snapshot["РћСЃРЅРѕРІРЅРѕР№ РїРѕРёСЃРє|14.09.2026|12|a"][
+        "price_rub"
+    ] == 180000
+    assert persisted_history == {
+        "РћСЃРЅРѕРІРЅРѕР№ РїРѕРёСЃРє|14.09.2026|12|a": [
+            [persisted_history["РћСЃРЅРѕРІРЅРѕР№ РїРѕРёСЃРє|14.09.2026|12|a"][0][0], 180000]
+        ]
+    }
+    assert not config.state_path.exists()
+    assert not config.history_path.exists()
