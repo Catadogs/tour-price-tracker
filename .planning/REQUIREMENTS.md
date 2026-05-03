@@ -121,7 +121,7 @@
 | TG-05 | Phase 2 | Pending |
 | TG-06 | Phase 2 | Pending |
 | TG-07 | Phase 2 | Pending |
-| TG-08 | Phase 2 | Pending |
+| TG-08 | Phase 3 | Pending |
 | TG-09 | Phase 2 | Pending |
 | TRK-01 | Phase 3 | Pending |
 | TRK-02 | Phase 3 | Pending |
@@ -129,8 +129,8 @@
 | TRK-04 | Phase 3 | Pending |
 | TRK-05 | Phase 3 | Pending |
 | TRK-06 | Phase 3 | Pending |
-| QUAL-05 | Phase 3 | Pending |
-| QUAL-06 | Phase 3 | Pending |
+| QUAL-05 | Phase 2 | Pending |
+| QUAL-06 | Phase 2 | Pending |
 | ANOM-01 | Phase 4 | Pending |
 | ANOM-02 | Phase 4 | Pending |
 | ANOM-03 | Phase 4 | Pending |
@@ -142,14 +142,14 @@
 | CURR-04 | Phase 5 | Pending |
 | CURR-05 | Phase 5 | Pending |
 | OPS-05 | Phase 5 | Pending |
-| QUAL-03 | Phase 5 | Pending |
+| QUAL-03 | Phase 4 | Pending |
 | QUAL-04 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 40 total
-- Mapped to phases: 40
+- v1 requirements: 41 total
+- Mapped to phases: 41
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-03*
-*Last updated: 2026-05-03 after initial definition*
+*Last updated: 2026-05-03 after roadmap creation*
