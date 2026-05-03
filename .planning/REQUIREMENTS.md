@@ -8,9 +8,9 @@
 
 ### Providers
 
-- [ ] **PROV-01**: Add stored real-world HTML fixtures for Biblio-Globus, Level.Travel, and Travelata so parser tests run without network requests.
-- [ ] **PROV-02**: Split provider-specific parsing into focused modules (`price_monitor/parsers/`) once the SQLite and alerting migration is stable.
-- [ ] **PROV-03**: Add per-provider rate limits and retry budgets to avoid hammering tour operators and survive transient failures.
+- [x] **PROV-01**: Add stored real-world HTML fixtures for Biblio-Globus, Level.Travel, and Travelata so parser tests run without network requests.
+- [x] **PROV-02**: Split provider-specific parsing into focused modules (`price_monitor/parsers/`) once the SQLite and alerting migration is stable.
+- [x] **PROV-03**: Add per-provider rate limits and retry budgets to avoid hammering tour operators and survive transient failures.
 
 ### Analytics
 
@@ -29,9 +29,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROV-01 | Phase 1 | Pending |
-| PROV-02 | Phase 1 | Pending |
-| PROV-03 | Phase 1 | Pending |
+| PROV-01 | Phase 1 | Done |
+| PROV-02 | Phase 1 | Done |
+| PROV-03 | Phase 1 | Done |
 | ANLY-01 | Phase 2 | Pending |
 | ANLY-02 | Phase 2 | Pending |
 | ANLY-03 | Phase 2 | Pending |

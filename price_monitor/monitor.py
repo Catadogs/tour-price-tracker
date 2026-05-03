@@ -149,40 +149,8 @@ def date_in_range(value: str, start: str, end: str) -> bool:
 
 
 def parse_offers(html: str) -> list[Offer]:
-    soup = BeautifulSoup(html, "html.parser")
-    offers: list[Offer] = []
-
-    for row in soup.select("tr"):
-        room_cell = row.select_one("td.c_ns")
-        price_cell = row.select_one("td.c_pe b.r")
-        booking_link = row.select_one("td.c_pe a[href]")
-
-        if not room_cell or not price_cell or not booking_link:
-            continue
-
-        query = parse_qs(urlparse(booking_link["href"]).query)
-        departure_date = first_query_value(query, "dt")
-        nights_raw = first_query_value(query, "kol")
-
-        if not departure_date or not nights_raw:
-            continue
-
-        price_rub = parse_int(price_cell.get_text())
-        price_usd = parse_usd(booking_link.get("title", ""))
-
-        offers.append(
-            Offer(
-                departure_date=departure_date,
-                nights=int(nights_raw),
-                room=room_cell.get_text(" ", strip=True),
-                price_rub=price_rub,
-                price_usd=price_usd,
-                booking_url=booking_link["href"],
-                hotel_option_id=first_query_value(query, "otn"),
-            )
-        )
-
-    return offers
+    from price_monitor.parsers import bgoperator
+    return bgoperator.parse_offers(html)
 
 
 def first_query_value(query: dict[str, list[str]], key: str) -> str | None:
@@ -638,46 +606,23 @@ def format_changes(
 
 
 def fetch_html(url: str) -> str:
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={
-            "User-Agent": "Mozilla/5.0 personal-bg-price-monitor",
-            "Accept": "text/html,application/xhtml+xml",
-        },
-    )
-    response.raise_for_status()
-    return response.text
+    from price_monitor.parsers._fetch import fetch_with_retry
+    provider = provider_from_url(url).lower().replace(".", "").replace(" ", "-")
+    return fetch_with_retry(url, provider)
 
 
 def extract_hotel_name(html: str, url: str) -> str | None:
-    hotel_id = first_query_value(parse_qs(urlparse(url).query), "F4")
-    if hotel_id:
-        pattern = re.compile(
-            rf"\[{re.escape(hotel_id)},\{{.*?\"n\":\"(?P<name>.*?)\"",
-            re.DOTALL,
-        )
-        match = pattern.search(html)
-        if match:
-            return decode_js_string(match.group("name"))
-
-    soup = BeautifulSoup(html, "html.parser")
-    title = soup.title.get_text(" ", strip=True) if soup.title else ""
-    match = re.search(r"в отель\s+(.+?)\.\s", title, flags=re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-
-    return None
+    from price_monitor.parsers import bgoperator
+    return bgoperator.extract_hotel_name(html, url)
 
 
 def parse_external_price(html: str, url: str) -> ExternalPrice:
     provider = provider_from_url(url)
-    return ExternalPrice(
-        provider=provider,
-        hotel_name=extract_external_hotel_name(html, provider),
-        price_rub=extract_external_min_price(html),
-        url=url,
-    )
+    if "level.travel" in provider.lower():
+        from price_monitor.parsers import leveltravel
+        return leveltravel.parse_external_price(html, url)
+    from price_monitor.parsers import travelata
+    return travelata.parse_external_price(html, url)
 
 
 def provider_from_url(url: str) -> str:
@@ -696,38 +641,13 @@ def is_bgoperator_url(url: str) -> bool:
 
 
 def extract_external_hotel_name(html: str, provider: str) -> str | None:
-    soup = BeautifulSoup(html, "html.parser")
-
-    for script in soup.select('script[type="application/ld+json"]'):
-        try:
-            data = json.loads(script.get_text())
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict) and data.get("@type") == "Hotel":
-            name = data.get("name")
-            if isinstance(name, str) and name.strip():
-                return name.strip()
-
-    title = soup.title.get_text(" ", strip=True) if soup.title else ""
-    if title:
-        for separator in (" - ", " – ", ", забронировать", " | "):
-            if separator in title:
-                return title.split(separator, 1)[0].strip()
-        return title.strip()
-
-    return provider
+    from price_monitor.parsers._external import extract_external_hotel_name as _extract
+    return _extract(html, provider)
 
 
 def extract_external_min_price(html: str) -> int | None:
-    candidates: list[int] = []
-
-    for match in re.finditer(r'"(?:minPrice|price)"\s*:\s*(\d{5,9})', html):
-        candidates.append(int(match.group(1)))
-
-    for match in re.finditer(r"от\s+(\d[\d\s\u00a0]*)\s*(?:руб|₽)", html, flags=re.IGNORECASE):
-        candidates.append(parse_int(match.group(1)))
-
-    return min(candidates) if candidates else None
+    from price_monitor.parsers._external import extract_external_min_price as _extract
+    return _extract(html)
 
 
 def decode_js_string(value: str) -> str:

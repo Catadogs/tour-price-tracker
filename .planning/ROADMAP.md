@@ -23,7 +23,7 @@
 
 **Plans**: 1 plan
 Plans:
-- [ ] 01-01-PLAN.md — Create parser package, fixtures, rate limits, retry, backward-compatible wrappers.
+- [x] 01-01-PLAN.md — Create parser package, fixtures, rate limits, retry, backward-compatible wrappers.
 
 ### Phase 2: Analytics & Insights
 **Goal**: Admin receives weekly price charts, trend summaries, configurable anomaly presets, and auto-pruning of old price history.
@@ -72,6 +72,6 @@ Plans:
 
 | Phase | Milestone | Plans | Status |
 |-------|-----------|-------|--------|
-| 1. Provider Hardening | v2.0 | 0/TBD | Not started |
+| 1. Provider Hardening | v2.0 | 1/1 | Complete |
 | 2. Analytics & Insights | v2.0 | 0/TBD | Not started |
 | 3. Operations | v2.0 | 0/TBD | Not started |
