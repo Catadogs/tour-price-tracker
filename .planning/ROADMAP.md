@@ -21,7 +21,9 @@
 3. Each provider has configurable rate limit (min seconds between requests) and retry budget (max attempts on failure).
 4. All existing 58 tests pass, new parser-specific tests added.
 
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 01-01-PLAN.md — Create parser package, fixtures, rate limits, retry, backward-compatible wrappers.
 
 ### Phase 2: Analytics & Insights
 **Goal**: Admin receives weekly price charts, trend summaries, configurable anomaly presets, and auto-pruning of old price history.
