@@ -1,9 +1,11 @@
+import logging
 from pathlib import Path
 
 from price_monitor.monitor import (
     MonitorConfig,
     best_by_departure_and_nights,
     escape_markdown_v2,
+    effective_config,
     initialize_storage,
     extract_hotel_name,
     filter_offers,
@@ -11,6 +13,7 @@ from price_monitor.monitor import (
     format_interval,
     load_price_history,
     load_runtime_settings,
+    load_search_targets,
     load_snapshot,
     parse_external_price,
     parse_date_range_text,
@@ -280,3 +283,90 @@ def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monke
     }
     assert not config.state_path.exists()
     assert not config.history_path.exists()
+
+
+def test_effective_config_ignores_invalid_runtime_settings(
+    tmp_path: Path,
+    caplog,
+):
+    config = MonitorConfig(
+        url="https://example.test",
+        departure_from="14.09.2026",
+        departure_to="17.09.2026",
+        nights=(12, 13),
+        room_filters=("SUPERIOR",),
+        interval_seconds=3600,
+        run_once=True,
+        db_path=tmp_path / "price_monitor.sqlite3",
+        state_path=tmp_path / "state.json",
+        settings_path=tmp_path / "settings.json",
+        strong_diff_rub=20000,
+        strong_diff_percent=7,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        target_price_rub=None,
+        history_path=tmp_path / "price_history.json",
+    )
+    initialize_storage(config)
+    save_runtime_settings(
+        config,
+        {
+            "nights": ["bad"],
+            "room_filters": 123,
+            "target_price_rub": "bad",
+            "strong_diff_rub": "bad",
+            "strong_diff_percent": "bad",
+            "interval_seconds": "bad",
+        },
+    )
+
+    with caplog.at_level(logging.WARNING):
+        active = effective_config(config)
+
+    assert active.nights == config.nights
+    assert active.room_filters == config.room_filters
+    assert active.target_price_rub == config.target_price_rub
+    assert active.strong_diff_rub == config.strong_diff_rub
+    assert active.strong_diff_percent == config.strong_diff_percent
+    assert active.interval_seconds == config.interval_seconds
+    assert "Ignoring invalid runtime setting nights" in caplog.text
+    assert "Ignoring invalid runtime setting room_filters" in caplog.text
+
+
+def test_load_search_targets_skips_malformed_entries(tmp_path: Path):
+    config = MonitorConfig(
+        url="https://example.test",
+        departure_from="14.09.2026",
+        departure_to="17.09.2026",
+        nights=(12, 13),
+        room_filters=(),
+        interval_seconds=3600,
+        run_once=True,
+        db_path=tmp_path / "price_monitor.sqlite3",
+        state_path=tmp_path / "state.json",
+        settings_path=tmp_path / "settings.json",
+        strong_diff_rub=20000,
+        strong_diff_percent=7,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        target_price_rub=None,
+        history_path=tmp_path / "price_history.json",
+    )
+    initialize_storage(config)
+    save_runtime_settings(
+        config,
+        {
+            "searches": [
+                "bad",
+                {"url": ""},
+                {"name": "Broken filters", "url": "https://level.travel/hotels/629-test", "room_filters": None},
+                {"name": "Valid", "url": "https://travelata.ru/", "room_filters": ["Room"]},
+            ]
+        },
+    )
+
+    targets = load_search_targets(config)
+
+    assert len(targets) == 2
+    assert targets[1].name == "Valid"
+    assert targets[1].room_filters == ("Room",)
