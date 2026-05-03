@@ -195,3 +195,24 @@ def test_malformed_legacy_json_logs_warning_and_completes(
     assert storage.load_runtime_settings(db_path) == {}
     assert metadata_value(db_path, "json_import_completed") == "1"
     assert "Skipping malformed legacy JSON" in caplog.text
+
+
+def test_corrupt_db_is_renamed_and_reinitialized(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    db_path = tmp_path / "price_monitor.sqlite3"
+    db_path.write_bytes(b"not a sqlite database")
+    Path(f"{db_path}-wal").write_bytes(b"stale wal")
+    Path(f"{db_path}-shm").write_bytes(b"stale shm")
+
+    with caplog.at_level(logging.WARNING):
+        storage.initialize_storage(db_path)
+
+    assert db_path.exists()
+    assert metadata_value(db_path, "schema_version") == "1"
+    assert not (tmp_path / "price_monitor.sqlite3-wal").exists()
+    assert not (tmp_path / "price_monitor.sqlite3-shm").exists()
+    assert len(list(tmp_path.glob("*.corrupt-*"))) == 3
+    assert "Corrupt SQLite database" in caplog.text
+    assert str(db_path) in caplog.text
