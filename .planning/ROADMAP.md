@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. The test suite passes, including focused SQLite tests for initialization, settings, snapshots, and price history writes.
 **Plans**: 3 plans
 Plans:
-- [ ] 01-01-PLAN.md - Create SQLite storage schema, one-time JSON migration, persistence operations, and corruption fallback.
+- [x] 01-01-PLAN.md - Create SQLite storage schema, one-time JSON migration, persistence operations, and corruption fallback.
 - [ ] 01-02-PLAN.md - Wire monitor runtime settings, snapshots, and price history to SQLite.
 - [x] 01-03-PLAN.md - Add Docker and documentation wiring for the SQLite database path.
 

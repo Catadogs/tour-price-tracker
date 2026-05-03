@@ -8,9 +8,9 @@
 ### Storage
 
 - [x] **STOR-01**: The application stores runtime settings in a local SQLite database file mounted through the Docker data volume.
-- [ ] **STOR-02**: The application stores observed tour price history in SQLite with timestamps, provider, hotel/search target, departure date, nights, and price in RUB.
-- [ ] **STOR-03**: The application stores latest snapshots in SQLite so price changes can be detected across checks.
-- [ ] **STOR-04**: The application can migrate or initialize from an empty database without manual SQL steps.
+- [x] **STOR-02**: The application stores observed tour price history in SQLite with timestamps, provider, hotel/search target, departure date, nights, and price in RUB.
+- [x] **STOR-03**: The application stores latest snapshots in SQLite so price changes can be detected across checks.
+- [x] **STOR-04**: The application can migrate or initialize from an empty database without manual SQL steps.
 - [x] **STOR-05**: The application no longer depends on JSON files for settings, snapshots, or price history in normal runtime.
 
 ### Telegram
@@ -55,13 +55,13 @@
 - [x] **OPS-01**: The application runs as a monolithic Python service in one process.
 - [x] **OPS-02**: The Docker image starts the bot with a single command and persists SQLite data through a mounted volume.
 - [x] **OPS-03**: The project does not require RabbitMQ, Redis, Kafka, Celery, PostgreSQL, MySQL, or separate worker containers.
-- [ ] **OPS-04**: The application handles malformed or missing persisted data without crashing the long-running service.
+- [x] **OPS-04**: The application handles malformed or missing persisted data without crashing the long-running service.
 - [ ] **OPS-05**: The application logs check failures, provider parse failures, Telegram delivery failures, and currency fetch failures with actionable messages.
 
 ### Quality
 
 - [ ] **QUAL-01**: Existing tests pass with the current `MonitorConfig` shape.
-- [ ] **QUAL-02**: SQLite storage has focused tests for initialization, settings persistence, snapshot persistence, and price history writes.
+- [x] **QUAL-02**: SQLite storage has focused tests for initialization, settings persistence, snapshot persistence, and price history writes.
 - [ ] **QUAL-03**: Anomaly detection has focused tests for same-date duration comparisons and threshold handling.
 - [ ] **QUAL-04**: Currency monitoring has focused tests for rate movement calculations and alert formatting.
 - [ ] **QUAL-05**: Telegram formatting and menu helpers have tests for key output and authorization behavior.
@@ -104,16 +104,16 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | STOR-01 | Phase 1 | Complete |
-| STOR-02 | Phase 1 | Pending |
-| STOR-03 | Phase 1 | Pending |
-| STOR-04 | Phase 1 | Pending |
+| STOR-02 | Phase 1 | Complete |
+| STOR-03 | Phase 1 | Complete |
+| STOR-04 | Phase 1 | Complete |
 | STOR-05 | Phase 1 | Complete |
 | OPS-01 | Phase 1 | Complete |
 | OPS-02 | Phase 1 | Complete |
 | OPS-03 | Phase 1 | Complete |
-| OPS-04 | Phase 1 | Pending |
+| OPS-04 | Phase 1 | Complete |
 | QUAL-01 | Phase 1 | Pending |
-| QUAL-02 | Phase 1 | Pending |
+| QUAL-02 | Phase 1 | Complete |
 | TG-01 | Phase 2 | Pending |
 | TG-02 | Phase 2 | Pending |
 | TG-03 | Phase 2 | Pending |
