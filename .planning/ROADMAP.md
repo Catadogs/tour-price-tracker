@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [ ] 01-01-PLAN.md - Create SQLite storage schema, one-time JSON migration, persistence operations, and corruption fallback.
 - [ ] 01-02-PLAN.md - Wire monitor runtime settings, snapshots, and price history to SQLite.
-- [ ] 01-03-PLAN.md - Add Docker and documentation wiring for the SQLite database path.
+- [x] 01-03-PLAN.md - Add Docker and documentation wiring for the SQLite database path.
 
 ### Phase 2: Admin Telegram Control UI and Authorization
 **Goal**: The configured admin can manage watch settings through Telegram controls, while unauthorized chats and unsafe URLs are rejected.
@@ -93,7 +93,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. SQLite State and Single-Container Foundation | 0/3 | Not started | - |
+| 1. SQLite State and Single-Container Foundation | 1/3 | In Progress | - |
 | 2. Admin Telegram Control UI and Authorization | 0/TBD | Not started | - |
 | 3. Price Tracking Summaries and Target Alerts | 0/TBD | Not started | - |
 | 4. Duration Anomaly Analytics | 0/TBD | Not started | - |
