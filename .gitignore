@@ -1,0 +1,7 @@
+.env
+.pytest_cache/
+__pycache__/
+*.pyc
+last_snapshot.json
+.claude/worktrees/
+/nul

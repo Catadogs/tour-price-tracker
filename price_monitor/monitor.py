@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from price_monitor import storage
+from price_monitor import currency, storage
 
 
 DEFAULT_URL = (
@@ -61,6 +61,9 @@ class MonitorConfig:
     telegram_chat_id: str | None
     target_price_rub: int | None
     history_path: Path
+    currency_source_url: str
+    currency_alert_threshold_pct: float
+    currency_check_hours: int
 
     @classmethod
     def from_env(cls) -> "MonitorConfig":
@@ -86,6 +89,14 @@ class MonitorConfig:
             telegram_chat_id=empty_to_none(os.getenv("TELEGRAM_CHAT_ID")),
             target_price_rub=int(target_raw) if target_raw else None,
             history_path=Path(os.getenv("BG_HISTORY_PATH", "/data/price_history.json")),
+            currency_source_url=os.getenv(
+                "BG_CURRENCY_SOURCE_URL",
+                "https://www.cbr-xml-daily.ru/daily_json.js",
+            ),
+            currency_alert_threshold_pct=float(
+                os.getenv("BG_CURRENCY_ALERT_THRESHOLD_PCT", "1.0")
+            ),
+            currency_check_hours=int(os.getenv("BG_CURRENCY_CHECK_HOURS", "24")),
         )
 
 
@@ -387,13 +398,9 @@ def format_report(
             else:
                 lines.append(f"• `{nights}` ночей: не найдено")
 
-        diff_line = format_strong_diff_line(
-            departure_date=departure_date,
-            by_nights=by_nights,
-            config=config,
-        )
-        if diff_line:
-            lines.append(f"⚖️ {diff_line.strip()}")
+    anomalies = format_duration_anomalies(best, config)
+    if anomalies:
+        lines.extend(["", "⚠️ *Аномалии длительности*", anomalies])
 
     return "\n".join(lines)
 
@@ -420,6 +427,31 @@ def format_price(offer: Offer) -> str:
 
 def format_rub(value: int) -> str:
     return f"{value:,} RUB".replace(",", " ")
+
+
+def format_duration_anomalies(
+    best: dict[str, dict[int, Offer]],
+    config: MonitorConfig,
+) -> str | None:
+    """Detect cases where a longer duration is cheaper than a shorter one on the same date."""
+    lines: list[str] = []
+    for date, by_nights in best.items():
+        sorted_nights = sorted(by_nights.keys())
+        for i, shorter in enumerate(sorted_nights):
+            for longer in sorted_nights[i + 1:]:
+                offer_s = by_nights[shorter]
+                offer_l = by_nights[longer]
+                if offer_l.price_rub >= offer_s.price_rub:
+                    continue
+                diff = offer_s.price_rub - offer_l.price_rub
+                pct = (diff / offer_s.price_rub) * 100
+                if diff < config.strong_diff_rub and pct < config.strong_diff_percent:
+                    continue
+                lines.append(
+                    f"⚠️ {date}: {longer}н дешевле {shorter}н "
+                    f"на {diff:,} RUB ({pct:.1f}%)"
+                )
+    return "\n".join(lines).replace(",", " ") if lines else None
 
 
 def format_strong_diff_line(
@@ -798,7 +830,17 @@ def run_check(config: MonitorConfig) -> str:
     current_snapshot: dict[str, dict[str, object]] = {}
 
     for target in load_search_targets(active_config):
-        html = fetch_html(target.url)
+        # Rewrite date parameters in Biblio-Globus URLs to match current config
+        fetch_url = target.url
+        if is_bgoperator_url(target.url):
+            fetch_url = re.sub(
+                r"data=[^&]*", f"data={active_config.departure_from}", fetch_url
+            )
+            fetch_url = re.sub(
+                r"d2=[^&]*", f"d2={active_config.departure_to}", fetch_url
+            )
+
+        html = fetch_html(fetch_url)
 
         if is_bgoperator_url(target.url):
             target_filters = target.room_filters or active_config.room_filters
@@ -1065,7 +1107,6 @@ class TelegramControlBot:
             self.send_message(chat_id, "Внутренняя ошибка, попробуй ещё раз.", reply_markup=main_keyboard())
 
     def run_manual_check(self, chat_id: int) -> None:
-        self.send_message(chat_id, "Проверяю цены...")
         with self.check_lock:
             try:
                 message = run_check(self.config)
@@ -1240,14 +1281,18 @@ def format_interval(seconds: int) -> str:
     return f"{seconds} сек."
 
 
+def _is_allowed_host(host: str) -> bool:
+    host = host.lower().removeprefix("www.")
+    return host in {"bgoperator.ru", "level.travel", "travelata.ru"}
+
+
 def normalize_search_url(text: str) -> str:
     url = text.strip()
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("нужна полная ссылка https://...")
     host = parsed.netloc.lower()
-    allowed_hosts = ("bgoperator.ru", "level.travel", "travelata.ru")
-    if not any(allowed in host for allowed in allowed_hosts):
+    if not _is_allowed_host(host):
         raise ValueError("поддерживаются только bgoperator.ru, level.travel и travelata.ru")
     if "bgoperator.ru" in host and "price.shtml" not in parsed.path:
         raise ValueError("для Библио-Глобуса нужна ссылка price.shtml")
@@ -1272,6 +1317,8 @@ def main() -> int:
     check_lock = threading.Lock()
     TelegramControlBot(config, check_lock).start()
 
+    last_currency_check: datetime | None = None
+
     while True:
         try:
             with check_lock:
@@ -1281,6 +1328,24 @@ def main() -> int:
             logging.exception("Price check failed")
             if config.run_once:
                 return 1
+
+        # Currency monitoring: check periodically based on configured interval
+        now = datetime.now()
+        if (
+            last_currency_check is None
+            or (now - last_currency_check).total_seconds() >= config.currency_check_hours * 3600
+        ):
+            try:
+                currency_alert = currency.run_currency_check(
+                    config.db_path,
+                    config.currency_source_url,
+                    config.currency_alert_threshold_pct,
+                )
+                if currency_alert:
+                    send_telegram(effective_config(config), currency_alert)
+                last_currency_check = now
+            except Exception:
+                logging.exception("Currency check failed")
 
         if config.run_once:
             return 0

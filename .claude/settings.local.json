@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(docker compose *)",
+      "Bash(docker build *)",
+      "Bash(docker cp *)",
+      "Bash(docker commit *)",
+      "Bash(docker rm *)",
+      "Bash(docker create *)"
+    ]
+  }
+}

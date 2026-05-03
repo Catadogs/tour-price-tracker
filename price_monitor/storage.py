@@ -57,6 +57,16 @@ ON latest_snapshots(target_name, provider, departure_date, nights, observed_at);
 
 CREATE INDEX IF NOT EXISTS idx_price_history_lookup
 ON price_history(target_name, provider, departure_date, nights, observed_at);
+
+CREATE TABLE IF NOT EXISTS currency_observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pair TEXT NOT NULL,
+  rate REAL NOT NULL,
+  observed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_currency_observations_lookup
+ON currency_observations(pair, observed_at);
 """
 
 
@@ -485,3 +495,26 @@ def _metadata_value(con: sqlite3.Connection, key: str) -> str | None:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def save_currency_observation(db_path: Path, pair: str, rate: float, observed_at: str) -> None:
+    with _connection(db_path) as con:
+        con.execute(
+            "INSERT INTO currency_observations(pair, rate, observed_at) VALUES (?, ?, ?)",
+            (pair, rate, observed_at),
+        )
+
+
+def load_currency_observations(
+    db_path: Path,
+    pair: str,
+    limit: int = 2,
+) -> list[tuple[str, float]]:
+    """Return list of (observed_at, rate) tuples ordered by recency."""
+    with _connection(db_path) as con:
+        rows = con.execute(
+            "SELECT observed_at, rate FROM currency_observations "
+            "WHERE pair = ? ORDER BY observed_at DESC LIMIT ?",
+            (pair, limit),
+        ).fetchall()
+    return [(row["observed_at"], row["rate"]) for row in rows]
