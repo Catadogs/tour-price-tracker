@@ -214,39 +214,96 @@ def effective_config(config: MonitorConfig) -> MonitorConfig:
     settings = load_runtime_settings(config)
     updates: dict[str, object] = {}
 
-    for key in (
-        "departure_from",
-        "departure_to",
-        "strong_diff_rub",
-        "strong_diff_percent",
-        "interval_seconds",
-    ):
+    for key in ("departure_from", "departure_to"):
         if key in settings:
             updates[key] = settings[key]
 
     if "nights" in settings:
-        updates["nights"] = tuple(int(item) for item in settings["nights"])  # type: ignore[index]
+        _apply_runtime_setting(updates, "nights", settings["nights"], _settings_nights)
     if "room_filters" in settings:
-        updates["room_filters"] = tuple(str(item) for item in settings["room_filters"])  # type: ignore[index]
+        _apply_runtime_setting(
+            updates,
+            "room_filters",
+            settings["room_filters"],
+            _settings_room_filters,
+        )
     if "target_price_rub" in settings:
-        raw = settings["target_price_rub"]
-        updates["target_price_rub"] = int(raw) if raw is not None else None  # type: ignore[arg-type]
+        _apply_runtime_setting(
+            updates,
+            "target_price_rub",
+            settings["target_price_rub"],
+            _settings_optional_int,
+        )
+    if "strong_diff_rub" in settings:
+        _apply_runtime_setting(updates, "strong_diff_rub", settings["strong_diff_rub"], int)
+    if "strong_diff_percent" in settings:
+        _apply_runtime_setting(
+            updates,
+            "strong_diff_percent",
+            settings["strong_diff_percent"],
+            float,
+        )
+    if "interval_seconds" in settings:
+        _apply_runtime_setting(
+            updates,
+            "interval_seconds",
+            settings["interval_seconds"],
+            int,
+        )
 
     return replace(config, **updates)
+
+
+def _apply_runtime_setting(
+    updates: dict[str, object],
+    key: str,
+    value: object,
+    convert,
+) -> None:
+    try:
+        updates[key] = convert(value)
+    except (TypeError, ValueError):
+        logging.warning("Ignoring invalid runtime setting %s=%r", key, value)
+
+
+def _settings_nights(value: object) -> tuple[int, ...]:
+    if isinstance(value, (str, bytes)):
+        raise TypeError("nights must be a sequence of integers")
+    nights = tuple(int(item) for item in value)  # type: ignore[union-attr]
+    if not nights:
+        raise ValueError("nights must not be empty")
+    return nights
+
+
+def _settings_room_filters(value: object) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes)):
+        return parse_filters(str(value))
+    return tuple(str(item) for item in value)  # type: ignore[union-attr]
+
+
+def _settings_optional_int(value: object) -> int | None:
+    return int(value) if value is not None else None
 
 
 def load_search_targets(config: MonitorConfig) -> list[SearchTarget]:
     settings = load_runtime_settings(config)
     targets = [SearchTarget(name="Основной поиск", url=config.url, room_filters=config.room_filters)]
 
-    for index, item in enumerate(settings.get("searches", []), start=2):  # type: ignore[arg-type]
+    raw_searches = settings.get("searches", [])
+    if not isinstance(raw_searches, list):
+        return targets
+
+    for index, item in enumerate(raw_searches, start=2):
         if not isinstance(item, dict):
             continue
         url = str(item.get("url") or "").strip()
         if not url:
             continue
         name = str(item.get("name") or f"Поиск {index}").strip()
-        filters = tuple(str(value) for value in item.get("room_filters", []))  # type: ignore[arg-type]
+        raw_filters = item.get("room_filters", [])
+        if not isinstance(raw_filters, list):
+            continue
+        filters = tuple(str(value) for value in raw_filters)
         targets.append(SearchTarget(name=name, url=url, room_filters=filters))
 
     return targets
