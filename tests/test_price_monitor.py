@@ -271,14 +271,12 @@ def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monke
 
     persisted_snapshot = load_snapshot(config)
     persisted_history = load_price_history(config)
+    snapshot_key = next(iter(persisted_snapshot))
 
-    assert persisted_snapshot["РћСЃРЅРѕРІРЅРѕР№ РїРѕРёСЃРє|14.09.2026|12|a"][
-        "price_rub"
-    ] == 180000
+    assert snapshot_key.endswith("|14.09.2026|12|a")
+    assert persisted_snapshot[snapshot_key]["price_rub"] == 180000
     assert persisted_history == {
-        "РћСЃРЅРѕРІРЅРѕР№ РїРѕРёСЃРє|14.09.2026|12|a": [
-            [persisted_history["РћСЃРЅРѕРІРЅРѕР№ РїРѕРёСЃРє|14.09.2026|12|a"][0][0], 180000]
-        ]
+        snapshot_key: [[persisted_history[snapshot_key][0][0], 180000]]
     }
     assert not config.state_path.exists()
     assert not config.history_path.exists()

@@ -767,8 +767,8 @@ def run_check(config: MonitorConfig) -> str:
                 "hotel": external_price.hotel_name or target.name,
             }
 
-    previous_snapshot = load_snapshot(active_config.state_path)
-    history = load_price_history(active_config.history_path)
+    previous_snapshot = load_snapshot(active_config)
+    history = load_price_history(active_config)
 
     changes = format_changes(previous_snapshot, current_snapshot)
     # Suppress notification when all changes are new offers (first run after empty snapshot)
@@ -778,9 +778,8 @@ def run_check(config: MonitorConfig) -> str:
     minimums = format_new_minimums(current_snapshot, history)
 
     ts = datetime.now().strftime("%Y-%m-%dT%H:%M")
-    update_price_history(history, current_snapshot, ts)
-    save_price_history(active_config.history_path, history)
-    save_snapshot(active_config.state_path, current_snapshot)
+    append_price_history(active_config, current_snapshot, ts)
+    save_snapshot(active_config, current_snapshot)
 
     target_alerts = (
         format_target_alerts(current_snapshot, active_config.target_price_rub)
