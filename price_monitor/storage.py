@@ -4,8 +4,10 @@ import json
 import logging
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 
 SCHEMA_VERSION = "1"
@@ -66,22 +68,34 @@ def initialize_storage(
     history_path: Path | None = None,
 ) -> None:
     with _WRITE_LOCK:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        with _connect(db_path) as con:
-            con.executescript(_SCHEMA_SQL)
-            _upsert_metadata(con, "schema_version", SCHEMA_VERSION)
-            if _metadata_value(con, "json_import_completed") is None:
-                _import_legacy_json(
-                    con,
-                    settings_path=settings_path,
-                    state_path=state_path,
-                    history_path=history_path,
-                )
-                _upsert_metadata(con, "json_import_completed", "1")
+        try:
+            _raise_if_not_sqlite_file(db_path)
+            _initialize_storage(
+                db_path,
+                settings_path=settings_path,
+                state_path=state_path,
+                history_path=history_path,
+            )
+        except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            if not db_path.exists():
+                raise
+            quarantined = _quarantine_database(db_path)
+            logging.warning(
+                "Corrupt SQLite database at %s quarantined as %s; replacement database initialized at %s",
+                db_path,
+                ", ".join(str(path) for path in quarantined),
+                db_path,
+            )
+            _initialize_storage(
+                db_path,
+                settings_path=settings_path,
+                state_path=state_path,
+                history_path=history_path,
+            )
 
 
 def load_runtime_settings(db_path: Path) -> dict[str, object]:
-    with _connect(db_path) as con:
+    with _connection(db_path) as con:
         rows = con.execute(
             "SELECT key, value_json FROM runtime_settings ORDER BY key"
         ).fetchall()
@@ -90,12 +104,12 @@ def load_runtime_settings(db_path: Path) -> dict[str, object]:
 
 def save_runtime_settings(db_path: Path, settings: dict[str, object]) -> None:
     with _WRITE_LOCK:
-        with _connect(db_path) as con:
+        with _connection(db_path) as con:
             _save_runtime_settings(con, settings)
 
 
 def load_snapshot(db_path: Path) -> dict[str, dict[str, object]]:
-    with _connect(db_path) as con:
+    with _connection(db_path) as con:
         rows = con.execute(
             "SELECT snapshot_key, payload_json FROM latest_snapshots ORDER BY snapshot_key"
         ).fetchall()
@@ -107,13 +121,13 @@ def load_snapshot(db_path: Path) -> dict[str, dict[str, object]]:
 
 def save_snapshot(db_path: Path, data: dict[str, dict[str, object]]) -> None:
     with _WRITE_LOCK:
-        with _connect(db_path) as con:
+        with _connection(db_path) as con:
             _save_snapshot(con, data)
 
 
 def load_price_history(db_path: Path) -> dict[str, list[list]]:
     history: dict[str, list[list]] = {}
-    with _connect(db_path) as con:
+    with _connection(db_path) as con:
         rows = con.execute(
             """
             SELECT snapshot_key, observed_at, price_rub
@@ -135,8 +149,30 @@ def append_price_history(
     observed_at: str,
 ) -> None:
     with _WRITE_LOCK:
-        with _connect(db_path) as con:
+        with _connection(db_path) as con:
             _append_price_history(con, current_snapshot, observed_at)
+
+
+def _initialize_storage(
+    db_path: Path,
+    *,
+    settings_path: Path | None,
+    state_path: Path | None,
+    history_path: Path | None,
+) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with _connection(db_path) as con:
+        con.executescript(_SCHEMA_SQL)
+        _verify_database(con)
+        _upsert_metadata(con, "schema_version", SCHEMA_VERSION)
+        if _metadata_value(con, "json_import_completed") is None:
+            _import_legacy_json(
+                con,
+                settings_path=settings_path,
+                state_path=state_path,
+                history_path=history_path,
+            )
+            _upsert_metadata(con, "json_import_completed", "1")
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -145,6 +181,44 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA busy_timeout = 10000")
     return con
+
+
+def _raise_if_not_sqlite_file(db_path: Path) -> None:
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        return
+    with db_path.open("rb") as file:
+        header = file.read(16)
+    if header != b"SQLite format 3\x00":
+        raise sqlite3.DatabaseError(f"{db_path} is not a SQLite database")
+
+
+@contextmanager
+def _connection(db_path: Path) -> Iterator[sqlite3.Connection]:
+    con = _connect(db_path)
+    try:
+        with con:
+            yield con
+    finally:
+        con.close()
+
+
+def _verify_database(con: sqlite3.Connection) -> None:
+    row = con.execute("PRAGMA quick_check").fetchone()
+    result = str(row[0]) if row else ""
+    if result.lower() != "ok":
+        raise sqlite3.DatabaseError(f"SQLite quick_check failed: {result}")
+
+
+def _quarantine_database(db_path: Path) -> list[Path]:
+    suffix = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    quarantined: list[Path] = []
+    for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        if not path.exists():
+            continue
+        target = path.with_name(f"{path.name}.corrupt-{suffix}")
+        path.rename(target)
+        quarantined.append(target)
+    return quarantined
 
 
 def _import_legacy_json(
