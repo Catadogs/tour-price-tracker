@@ -32,15 +32,18 @@ The bot must reliably notify the admin when a desirable tour becomes worth actin
 - ✓ Monitor USD/RUB and EUR/RUB exchange rates daily and send preemptive warnings when a significant intraday jump may cause next-day tour price increases. — v1.0 (Phase 5: `price_monitor/currency.py`, CBR integration, `currency_observations` SQLite table)
 - ✓ Preserve and expand test coverage around parsers, Telegram formatting, SQLite persistence, anomaly detection, and currency alerts. — v1.0 (58 tests across all subsystems)
 
-### Active
+### Active (v2.0)
 
-- [ ] Add stored real-world HTML fixtures for Biblio-Globus, Level.Travel, and Travelata (PROV-01 — v2)
-- [ ] Split provider-specific parsing into focused modules (PROV-02 — v2)
-- [ ] Add trend charts or compact historical summaries in Telegram (ANLY-01 — v2)
-- [ ] Add retention settings for historical prices (ANLY-02 — v2)
-- [ ] Add Docker healthcheck or lightweight liveness signal (OPER-01 — v2)
-- [ ] Document backup and restore commands for the SQLite volume (OPER-02 — v2)
-- [ ] Add CI to run tests and build the Docker image (OPER-03 — v2)
+- [ ] PROV-01: Add stored real-world HTML fixtures for Biblio-Globus, Level.Travel, and Travelata
+- [ ] PROV-02: Split provider-specific parsing into focused modules
+- [ ] PROV-03: Add per-provider rate limits and retry budgets
+- [ ] ANLY-01: Add compact trend summaries in Telegram
+- [ ] ANLY-02: Add retention settings for historical prices
+- [ ] ANLY-03: Add configurable anomaly presets (conservative/balanced/aggressive)
+- [ ] ANLY-04: Weekly price change chart (PNG via matplotlib) sent to Telegram
+- [ ] OPER-01: Docker healthcheck
+- [ ] OPER-02: Document backup and restore commands for SQLite volume
+- [ ] OPER-03: CI pipeline for tests and Docker image builds
 
 ### Out of Scope
 
