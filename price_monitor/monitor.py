@@ -1302,6 +1302,50 @@ def format_interval(seconds: int) -> str:
     return f"{seconds} сек."
 
 
+def send_chart(config: MonitorConfig, chart_path: Path, chat_id: str | None = None) -> None:
+    """Send a PNG chart to Telegram via sendPhoto."""
+    if not config.telegram_bot_token:
+        return
+    target_chat_id = chat_id or config.telegram_chat_id
+    if not target_chat_id:
+        return
+    with chart_path.open("rb") as f:
+        response = requests.post(
+            f"https://api.telegram.org/bot{config.telegram_bot_token}/sendPhoto",
+            data={"chat_id": target_chat_id},
+            files={"photo": (chart_path.name, f, "image/png")},
+            timeout=30,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Telegram sendPhoto failed: HTTP {response.status_code}, body={response.text}"
+        )
+
+
+def _send_chart_if_needed(
+    config: MonitorConfig,
+    interval_hours: int,
+    last_sent: datetime | None,
+) -> datetime | None:
+    """Send weekly chart if enough time has passed."""
+    now = datetime.now()
+    if last_sent and (now - last_sent).total_seconds() < interval_hours * 3600:
+        return last_sent
+    try:
+        from price_monitor import charts
+        chart_path = charts.generate_price_chart(
+            config.db_path,
+            config.db_path.parent / "charts",
+        )
+        if chart_path and config.telegram_chat_id:
+            send_chart(config, chart_path)
+            logging.info("Weekly price chart sent")
+        return now
+    except Exception:
+        logging.exception("Weekly chart generation/send failed")
+        return last_sent
+
+
 def _is_allowed_host(host: str) -> bool:
     host = host.lower().removeprefix("www.")
     return host in {"bgoperator.ru", "level.travel", "travelata.ru"}
@@ -1392,6 +1436,8 @@ def main() -> int:
 
         active = effective_config(config)
         last_prune = _prune_if_needed(config, active.price_history_retention_days, last_prune)
+        if active.chart_interval_hours > 0:
+            last_chart_sent = _send_chart_if_needed(config, active.chart_interval_hours, last_chart_sent)
 
         sleep_seconds = adaptive_interval(active.departure_from, active.interval_seconds)
         logging.info("Next check in %s", format_interval(sleep_seconds))
