@@ -64,6 +64,9 @@ class MonitorConfig:
     currency_source_url: str
     currency_alert_threshold_pct: float
     currency_check_hours: int
+    price_history_retention_days: int
+    chart_interval_hours: int
+    anomaly_preset: str  # "conservative" | "balanced" | "aggressive"
 
     @classmethod
     def from_env(cls) -> "MonitorConfig":
@@ -97,6 +100,9 @@ class MonitorConfig:
                 os.getenv("BG_CURRENCY_ALERT_THRESHOLD_PCT", "1.0")
             ),
             currency_check_hours=int(os.getenv("BG_CURRENCY_CHECK_HOURS", "24")),
+            price_history_retention_days=int(os.getenv("BG_PRICE_HISTORY_RETENTION_DAYS", "90")),
+            chart_interval_hours=int(os.getenv("BG_CHART_INTERVAL_HOURS", "168")),
+            anomaly_preset=os.getenv("BG_ANOMALY_PRESET", "balanced"),
         )
 
 
@@ -113,6 +119,13 @@ class ExternalPrice:
     hotel_name: str | None
     price_rub: int | None
     url: str
+
+
+ANOMALY_PRESETS: dict[str, dict[str, object]] = {
+    "conservative": {"strong_diff_rub": 30000, "strong_diff_percent": 10.0},
+    "balanced": {"strong_diff_rub": 20000, "strong_diff_percent": 7.0},
+    "aggressive": {"strong_diff_rub": 10000, "strong_diff_percent": 4.0},
+}
 
 
 def empty_to_none(value: str | None) -> str | None:
@@ -227,6 +240,20 @@ def effective_config(config: MonitorConfig) -> MonitorConfig:
             updates,
             "interval_seconds",
             settings["interval_seconds"],
+            int,
+        )
+    if "anomaly_preset" in settings:
+        preset_name = str(settings["anomaly_preset"])
+        preset = ANOMALY_PRESETS.get(preset_name)
+        if preset:
+            updates["anomaly_preset"] = preset_name
+            updates["strong_diff_rub"] = int(preset["strong_diff_rub"])
+            updates["strong_diff_percent"] = float(preset["strong_diff_percent"])
+    if "price_history_retention_days" in settings:
+        _apply_runtime_setting(
+            updates,
+            "price_history_retention_days",
+            settings["price_history_retention_days"],
             int,
         )
 
