@@ -36,9 +36,9 @@
 | ANLY-02 | Phase 2 | Done |
 | ANLY-03 | Phase 2 | Done |
 | ANLY-04 | Phase 2 | Done |
-| OPER-01 | Phase 3 | Pending |
-| OPER-02 | Phase 3 | Pending |
-| OPER-03 | Phase 3 | Pending |
+| OPER-01 | Phase 3 | Done |
+| OPER-02 | Phase 3 | Done |
+| OPER-03 | Phase 3 | Done |
 
 **Coverage:** 10/10 v2.0 requirements mapped, 0 orphaned.
 

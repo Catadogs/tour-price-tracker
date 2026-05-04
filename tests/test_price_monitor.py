@@ -5,7 +5,9 @@ import threading
 
 from price_monitor.monitor import (
     ANOMALY_PRESETS,
+    HotelGroup,
     MonitorConfig,
+    TargetResult,
     TelegramControlBot,
     adaptive_interval,
     best_by_departure_and_nights,
@@ -16,7 +18,9 @@ from price_monitor.monitor import (
     filter_offers,
     find_overall_best,
     format_changes,
+    format_comparison,
     format_duration_anomalies,
+    format_new_arrivals,
     format_new_minimums,
     format_report,
     format_strong_diff_line,
@@ -84,20 +88,17 @@ def test_filter_and_best_offer_by_departure_and_nights():
     config = MonitorConfig(
         url="https://example.test",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         room_filters=(),
         interval_seconds=1,
         run_once=True,
         db_path=Path("price_monitor.sqlite3"),
-        state_path=Path("state.json"),
-        settings_path=Path("settings.json"),
         strong_diff_rub=20000,
         strong_diff_percent=7,
         telegram_bot_token=None,
         telegram_chat_id=None,
         target_price_rub=None,
-        history_path=Path("price_history.json"),
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
@@ -123,20 +124,17 @@ def test_strong_diff_line_flags_large_12_13_gap():
     config = MonitorConfig(
         url="https://example.test",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         room_filters=(),
         interval_seconds=1,
         run_once=True,
         db_path=Path("price_monitor.sqlite3"),
-        state_path=Path("state.json"),
-        settings_path=Path("settings.json"),
         strong_diff_rub=20000,
         strong_diff_percent=7,
         telegram_bot_token=None,
         telegram_chat_id=None,
         target_price_rub=None,
-        history_path=Path("price_history.json"),
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
@@ -153,9 +151,9 @@ def test_strong_diff_line_flags_large_12_13_gap():
 
 
 def test_parse_date_range_text():
-    assert parse_date_range_text("14.09.2026 17.09.2026") == (
+    assert parse_date_range_text("14.09.2026 16.09.2026") == (
         "14.09.2026",
-        "17.09.2026",
+        "16.09.2026",
     )
 
 
@@ -175,13 +173,13 @@ def test_normalize_search_url_accepts_level_and_travelata():
 
 
 def test_escape_markdown_v2_keeps_format_markers_and_escapes_plain_text():
-    text = "🏨 *Main search*\n🏩 Отель: `JAZ MAKADI 5*`\n📅 Period: `14.09.2026 - 17.09.2026`"
+    text = "🏨 *Main search*\n🏩 Отель: `JAZ MAKADI 5*`\n📅 Period: `14.09.2026 - 16.09.2026`"
 
     escaped = escape_markdown_v2(text)
 
     assert "*Main search*" in escaped
     assert "`JAZ MAKADI 5*`" in escaped
-    assert "`14.09.2026 - 17.09.2026`" in escaped
+    assert "`14.09.2026 - 16.09.2026`" in escaped
 
 
 def test_parse_and_format_interval_text():
@@ -226,20 +224,17 @@ def test_monitor_storage_wrappers_use_sqlite(tmp_path: Path):
     config = MonitorConfig(
         url="https://example.test",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         room_filters=(),
         interval_seconds=1,
         run_once=True,
         db_path=tmp_path / "price_monitor.sqlite3",
-        state_path=tmp_path / "state.json",
-        settings_path=tmp_path / "settings.json",
         strong_diff_rub=20000,
         strong_diff_percent=7,
         telegram_bot_token=None,
         telegram_chat_id=None,
         target_price_rub=None,
-        history_path=tmp_path / "price_history.json",
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
@@ -267,8 +262,6 @@ def test_monitor_storage_wrappers_use_sqlite(tmp_path: Path):
     }
     assert load_snapshot(config)["Main search|14.09.2026|12|a"]["price_rub"] == 180000
     assert load_price_history(config) == {}
-    assert not config.settings_path.exists()
-    assert not config.state_path.exists()
 
 
 def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monkeypatch):
@@ -286,20 +279,17 @@ def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monke
     config = MonitorConfig(
         url="https://www.bgoperator.ru/price.shtml?action=price",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12,),
         room_filters=(),
         interval_seconds=1,
         run_once=True,
         db_path=tmp_path / "price_monitor.sqlite3",
-        state_path=tmp_path / "state.json",
-        settings_path=tmp_path / "settings.json",
         strong_diff_rub=20000,
         strong_diff_percent=7,
         telegram_bot_token=None,
         telegram_chat_id=None,
         target_price_rub=None,
-        history_path=tmp_path / "price_history.json",
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
@@ -321,8 +311,6 @@ def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monke
     assert persisted_history == {
         snapshot_key: [[persisted_history[snapshot_key][0][0], 180000]]
     }
-    assert not config.state_path.exists()
-    assert not config.history_path.exists()
 
 
 def test_effective_config_ignores_invalid_runtime_settings(
@@ -332,20 +320,17 @@ def test_effective_config_ignores_invalid_runtime_settings(
     config = MonitorConfig(
         url="https://example.test",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         room_filters=("SUPERIOR",),
         interval_seconds=3600,
         run_once=True,
         db_path=tmp_path / "price_monitor.sqlite3",
-        state_path=tmp_path / "state.json",
-        settings_path=tmp_path / "settings.json",
         strong_diff_rub=20000,
         strong_diff_percent=7,
         telegram_bot_token=None,
         telegram_chat_id=None,
         target_price_rub=None,
-        history_path=tmp_path / "price_history.json",
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
@@ -383,20 +368,17 @@ def test_load_search_targets_skips_malformed_entries(tmp_path: Path):
     config = MonitorConfig(
         url="https://example.test",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         room_filters=(),
         interval_seconds=3600,
         run_once=True,
         db_path=tmp_path / "price_monitor.sqlite3",
-        state_path=tmp_path / "state.json",
-        settings_path=tmp_path / "settings.json",
         strong_diff_rub=20000,
         strong_diff_percent=7,
         telegram_bot_token=None,
         telegram_chat_id=None,
         target_price_rub=None,
-        history_path=tmp_path / "price_history.json",
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
@@ -451,23 +433,20 @@ def test_normalize_search_url_accepts_www_prefix():
 
 
 def _make_bot_config(**kwargs):
-    defaults = {
+    defaults: dict[str, object] = {
         "url": "https://example.test",
         "departure_from": "14.09.2026",
-        "departure_to": "17.09.2026",
+        "departure_to": "16.09.2026",
         "nights": (12, 13),
         "room_filters": (),
         "interval_seconds": 3600,
         "run_once": True,
         "db_path": Path("price_monitor.sqlite3"),
-        "state_path": Path("state.json"),
-        "settings_path": Path("settings.json"),
         "strong_diff_rub": 20000,
         "strong_diff_percent": 7,
         "telegram_bot_token": "test-token",
         "telegram_chat_id": None,
         "target_price_rub": None,
-        "history_path": Path("price_history.json"),
         "currency_source_url": "https://example.test/rates",
         "currency_alert_threshold_pct": 1.0,
         "currency_check_hours": 24,
@@ -514,7 +493,7 @@ def test_main_keyboard_structure():
         "check", "settings", "add_search", "clear_searches",
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
-        "trend",
+        "trend", "recommend",
     }
     assert callback_data_values == expected
 
@@ -536,7 +515,7 @@ def test_settings_keyboard_structure():
         "check", "add_search", "clear_searches",
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
-        "set_retention", "anomaly_preset", "trend",
+        "set_retention", "anomaly_preset", "trend", "recommend", "set_reference",
     }
     assert callback_data_values == expected
 
@@ -545,7 +524,7 @@ def test_format_settings_contains_key_fields(tmp_path: Path):
     config = _make_bot_config(
         db_path=tmp_path / "price_monitor.sqlite3",
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         target_price_rub=180000,
         interval_seconds=3600,
@@ -555,7 +534,7 @@ def test_format_settings_contains_key_fields(tmp_path: Path):
     output = format_settings(config)
 
     assert "14.09.2026" in output
-    assert "17.09.2026" in output
+    assert "16.09.2026" in output
     assert "12" in output
     assert "13" in output
     assert "180 000" in output
@@ -600,7 +579,7 @@ def test_find_overall_best_returns_none_for_empty():
 def test_format_report_includes_all_sections():
     config = _make_bot_config(
         departure_from="14.09.2026",
-        departure_to="17.09.2026",
+        departure_to="16.09.2026",
         nights=(12, 13),
         room_filters=("Superior",),
     )
@@ -616,12 +595,12 @@ def test_format_report_includes_all_sections():
     assert "Test Hotel" in report
     assert "Grand Resort 5*" in report
     assert "14.09.2026" in report
-    assert "17.09.2026" in report
+    assert "16.09.2026" in report
     assert "12" in report
     assert "13" in report
     assert "Superior" in report
     assert "250 000 RUB" in report
-    assert "Лучшая цена" in report
+    assert "Лучшая" in report
     assert "По датам вылета" in report
 
 
@@ -705,7 +684,7 @@ def test_format_changes_detects_price_decrease():
     # Price decrease uses 📉 emoji, not text "упала"
     assert "📉" in changes
     assert "180 000 RUB" in changes
-    assert "Забронировать" in changes
+    assert "Посмотреть" in changes
 
 
 def test_format_new_minimums_detects_historical_low():
@@ -719,11 +698,13 @@ def test_format_new_minimums_detects_historical_low():
         ],
     }
 
-    result = format_new_minimums(current, history)
+    result, keys = format_new_minimums(current, history)
 
     assert result is not None
-    assert "Исторический минимум" in result
+    assert "14.09.2026" in result
     assert "150 000 RUB" in result
+    assert len(keys) == 1
+    assert "Main|14.09.2026|12|a" in keys
 
 
 def test_format_new_minimums_skips_when_not_minimum():
@@ -737,9 +718,41 @@ def test_format_new_minimums_skips_when_not_minimum():
         ],
     }
 
-    result = format_new_minimums(current, history)
+    result, keys = format_new_minimums(current, history)
 
     assert result is None
+    assert len(keys) == 0
+
+
+def test_format_changes_skips_minimum_keys():
+    """Items already reported as historical minimums are skipped in changes."""
+    previous = {
+        "t|14.09.2026|12|a": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 200000},
+    }
+    current = {
+        "t|14.09.2026|12|a": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 150000},
+    }
+    # Skip the price drop because it's already a minimum
+    result = format_changes(previous, current, {"t|14.09.2026|12|a"})
+    assert result is None
+
+
+def test_format_changes_keeps_non_minimum_changes():
+    """Non-minimum price changes still appear."""
+    previous = {
+        "t|14.09.2026|12|a": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 200000},
+        "t|14.09.2026|12|b": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 300000},
+    }
+    current = {
+        "t|14.09.2026|12|a": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 150000},
+        "t|14.09.2026|12|b": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 280000},
+    }
+    # Skip "a" (minimum), "b" should still show
+    result = format_changes(previous, current, {"t|14.09.2026|12|a"})
+    assert result is not None
+    assert "📉" in result
+    assert "280" in result
+    assert "150" not in result  # Skipped
 
 
 def test_format_target_alerts_detects_target_met():
@@ -994,12 +1007,221 @@ def test_anomaly_presets_valid():
 
 
 def test_format_trend_report_direction_stable(tmp_path: Path):
-    """Stable prices show стабильно."""
+    """Stable prices show → 0%."""
     from price_monitor import storage
     db_path = tmp_path / "test_trend_stable.sqlite3"
     storage.initialize_storage(db_path)
-    snap = {"t|d|12|r": {"departure_date": "d", "nights": 12, "price_rub": 100000}}
+    snap = {"t|14.09.2026|12|r": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000}}
     storage.append_price_history(db_path, snap, "2026-05-01T10:00")
     storage.append_price_history(db_path, snap, "2026-05-03T10:00")
     report = format_trend_report(db_path)
-    assert "стабильно" in report
+    assert "→ 0%" in report
+
+
+# --- Cross-provider comparison tests ---
+
+
+def test_normalize_hotel_name():
+    from price_monitor.monitor import _normalize_hotel_name
+    assert _normalize_hotel_name("InterContinental Resort & Spa") == "intercontinental resort  spa"
+    assert _normalize_hotel_name("  HOTEL 123 ") == "hotel 123"
+    assert _normalize_hotel_name("Rixos, Premium") == "rixos premium"
+
+
+def test_match_hotels_exact_match():
+    from price_monitor.monitor import match_hotels_across_providers
+    results = [
+        TargetResult("t1", "Библио-Глобус", "InterContinental", None, None),
+        TargetResult("t2", "Level.Travel", "InterContinental", None, None),
+    ]
+    groups = match_hotels_across_providers(results)
+    assert len(groups) == 1
+    assert groups[0].hotel_name == "InterContinental"
+    assert len(groups[0].results) == 2
+
+
+def test_match_hotels_fuzzy():
+    from price_monitor.monitor import match_hotels_across_providers
+    results = [
+        TargetResult("t1", "Библио-Глобус", "InterContinental Resort", None, None),
+        TargetResult("t2", "Level.Travel", "InterContinental Resort & Spa", None, None),
+        TargetResult("t3", "Travelata", "Intercontinental resort spa 5*", None, None),
+    ]
+    groups = match_hotels_across_providers(results)
+    assert len(groups) == 1
+    assert len(groups[0].results) == 3
+
+
+def test_match_hotels_no_match():
+    from price_monitor.monitor import match_hotels_across_providers
+    results = [
+        TargetResult("t1", "Библио-Глобус", "Rixos Premium", None, None),
+        TargetResult("t2", "Level.Travel", "Titanic Deluxe", None, None),
+    ]
+    groups = match_hotels_across_providers(results)
+    assert len(groups) == 0
+
+
+def test_match_hotels_single_provider_ignored():
+    from price_monitor.monitor import match_hotels_across_providers
+    results = [
+        TargetResult("t1", "Библио-Глобус", "Rixos Premium", None, None),
+        TargetResult("t2", "Level.Travel", "Titanic Deluxe", None, None),
+        TargetResult("t3", "Travelata", "Titanic Deluxe Hotel", None, None),
+    ]
+    groups = match_hotels_across_providers(results)
+    assert len(groups) == 1  # Only Titanic matched across 2 providers
+    assert groups[0].hotel_name == "Titanic Deluxe"
+
+
+def test_format_comparison_empty():
+    assert format_comparison([]) is None
+
+
+def test_format_comparison_with_group():
+    from price_monitor.monitor import Offer
+    # BG result with actual offers
+    offers = {
+        "14.09.2026": {
+            12: Offer("14.09.2026", 12, "Standard", 280000, None, "http://bg.ru", None),
+            13: Offer("14.09.2026", 13, "Standard", 310000, None, "http://bg.ru", None),
+        }
+    }
+    from price_monitor.monitor import ExternalPrice
+    ext_price = ExternalPrice("Level.Travel", "InterContinental", 305000, "http://lt.ru")
+
+    results = [
+        TargetResult("BG", "Библио-Глобус", "InterContinental", offers, None),
+        TargetResult("LT", "Level.Travel", "InterContinental", None, ext_price),
+    ]
+    from price_monitor.monitor import match_hotels_across_providers
+    groups = match_hotels_across_providers(results)
+    text = format_comparison(groups)
+    assert text is not None
+    assert "Сравнение цен" in text
+    assert "InterContinental" in text
+    assert "280 000 RUB" in text
+    assert "305 000 RUB" in text
+    assert "Библио-Глобус" in text
+    assert "Level.Travel" in text
+
+
+def test_format_comparison_price_not_found():
+    from price_monitor.monitor import ExternalPrice
+    results = [
+        TargetResult("t1", "Библио-Глобус", "Rixos", None, None),
+        TargetResult("t2", "Level.Travel", "Rixos", None, ExternalPrice("Level.Travel", "Rixos", None, "http://lt.ru")),
+    ]
+    from price_monitor.monitor import match_hotels_across_providers
+    groups = match_hotels_across_providers(results)
+    text = format_comparison(groups)
+    assert text is not None
+    assert "цена не найдена" in text
+
+
+def test_format_comparison_no_overall_best():
+    from price_monitor.monitor import ExternalPrice
+    # Empty best_by_date means no BG offers — shows "цена не найдена"
+    results = [
+        TargetResult("t1", "Библио-Глобус", "Rixos", {}, None),
+        TargetResult("t2", "Level.Travel", "Rixos", None, ExternalPrice("Level.Travel", "Rixos", 250000, "http://lt.ru")),
+    ]
+    from price_monitor.monitor import match_hotels_across_providers
+    groups = match_hotels_across_providers(results)
+    text = format_comparison(groups)
+    assert text is not None
+    assert "цена не найдена" in text
+    assert "250 000 RUB" in text
+
+
+# --- New arrivals detection tests ---
+
+
+def test_format_new_arrivals_first_run():
+    """Empty previous snapshot: no alerts on first run."""
+    from price_monitor.monitor import format_new_arrivals
+    current = {"t|14.09.2026|12|room": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"}}
+    dates, rooms = format_new_arrivals({}, current)
+    assert dates is None
+    assert rooms is None
+
+
+def test_format_new_arrivals_new_date_detected():
+    """New date in current snapshot triggers alert."""
+    from price_monitor.monitor import format_new_arrivals
+    previous = {
+        "t|14.09.2026|12|room": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+    }
+    current = {
+        "t|14.09.2026|12|room": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+        "t|15.09.2026|12|room": {"departure_date": "15.09.2026", "nights": 12, "price_rub": 95000, "room": "Standard"},
+    }
+    dates, rooms = format_new_arrivals(previous, current)
+    assert dates is not None
+    assert "Новые даты вылета" in dates
+    assert "15.09.2026" in dates
+    assert rooms is None  # Same room, new date — counts as new date, not new room
+
+
+def test_format_new_arrivals_external_excluded():
+    """External entries excluded from date comparison."""
+    from price_monitor.monitor import format_new_arrivals
+    previous = {
+        "t|14.09.2026|12|room": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+        "ext|external": {"departure_date": "external", "nights": 0, "price_rub": 300000, "hotel": "Rixos"},
+    }
+    current = {
+        "t|14.09.2026|12|room": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+        "ext|external": {"departure_date": "external", "nights": 0, "price_rub": 305000, "hotel": "Rixos"},
+    }
+    dates, rooms = format_new_arrivals(previous, current)
+    assert dates is None  # No new real dates
+    assert rooms is None
+
+
+def test_format_new_arrivals_new_room_on_existing_date():
+    """New room/hotel on existing date triggers hotel alert."""
+    from price_monitor.monitor import format_new_arrivals
+    previous = {
+        "t|14.09.2026|12|standard": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+    }
+    current = {
+        "t|14.09.2026|12|standard": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+        "t|14.09.2026|12|deluxe": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 150000, "room": "Deluxe"},
+    }
+    dates, rooms = format_new_arrivals(previous, current)
+    assert dates is None  # No new dates
+    assert rooms is not None
+    assert "Новые отели/номера" in rooms
+    assert "Deluxe" in rooms
+
+
+def test_format_new_arrivals_no_changes():
+    """Identical snapshots produce no alerts."""
+    from price_monitor.monitor import format_new_arrivals
+    snap = {
+        "t|14.09.2026|12|room": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+    }
+    dates, rooms = format_new_arrivals(snap, snap)
+    assert dates is None
+    assert rooms is None
+
+
+def test_format_new_arrivals_combined():
+    """New date AND new room on existing date — both alerts."""
+    from price_monitor.monitor import format_new_arrivals
+    previous = {
+        "t|14.09.2026|12|std": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+    }
+    current = {
+        "t|14.09.2026|12|std": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 100000, "room": "Standard"},
+        "t|14.09.2026|12|dlx": {"departure_date": "14.09.2026", "nights": 12, "price_rub": 150000, "room": "Deluxe"},
+        "t|15.09.2026|12|std": {"departure_date": "15.09.2026", "nights": 12, "price_rub": 95000, "room": "Standard"},
+    }
+    dates, rooms = format_new_arrivals(previous, current)
+    assert dates is not None
+    assert "Новые даты вылета" in dates
+    assert "15.09.2026" in dates
+    assert rooms is not None
+    assert "Новые отели/номера" in rooms
+    assert "Deluxe" in rooms

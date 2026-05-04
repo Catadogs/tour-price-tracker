@@ -1,53 +1,72 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: production-hardening
-status: executing
-stopped_at: Phase 02 complete, 72 tests pass
-last_updated: "2026-05-04T00:30:00.000Z"
+milestone: v5.0
+milestone_name: recommendation-and-polish
+status: complete
+stopped_at: All v5.0 features complete, 89 tests pass
+last_updated: "2026-05-04T14:00:00.000Z"
 last_activity: 2026-05-04
 progress:
-  total_phases: 3
+  total_phases: 2
   completed_phases: 2
-  total_plans: 2
+  period: 1
   completed_plans: 2
-  percent: 70
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-03)
-
 **Core value:** The bot must reliably notify the admin when a desirable tour becomes worth acting on before the price changes or disappears.
-**Current focus:** Phase 2 — Analytics & Insights (trends, retention, anomaly presets, weekly charts)
+**Current focus:** v5.0 complete. AI recommendation engine + UI polish + auto-competitor search.
 
 ## Current Position
 
-Phase: 03 (operations) — PENDING
-Plan: N/A
-Status: Phase 02 complete. 72 tests pass. Trends, retention pruning, anomaly presets, and matplotlib charts are integrated.
-Last activity: 2026-05-04
+Phase: 08-09 (recommendation + polish) — COMPLETE
+Status: 89 tests pass. All features integrated and running in container.
 
-Progress: [██████----] 70%
+Progress: [██████████] 100%
+
+## v5.0 Features
+
+### Phase 08: AI Recommendation Engine
+- 🤖 `_generate_recommendation_from_db` — buy/wait/hold verdict per hotel
+- Minimum 5 unique check timestamps required before giving verdict
+- Uses: current price, historical minimum, days to departure, USD/RUB trend
+- Verdicts: 🎯 БРАТЬ, 👍 МОЖНО БРАТЬ, ⏳ ЖДАТЬ, 🔴 ДОРОГО, ⏰ ПОРА, 📊 Мало данных
+- 💵 Reference price setting — user sets expected price, shown in recommendation
+- Кнопка 🤖 Совет в главном меню и настройках
+
+### Phase 09: Report Polish
+- Links: Бронь→Смотреть, Забронировать→Посмотреть
+- Max 3 days in report, dates hidden if <10% price difference from previous
+- Missing nights (не найдено) removed from report
+- Best price line compacted to single line
+- Cross-hotel comparison block (🏨 Сравнение отелей)
+- Auto-competitor search: adding BG hotel auto-adds Level.Travel + Travelata searches
+- Trend report: ±1 day only if >10% different, "стабильно"→"→0%"
+- Better Russian pluralization (дата/даты/дат)
 
 ## Accumulated Context
 
-### Decisions (from v1.0)
+### All Milestones
 
-Carried forward from v1.0:
-- Single-user/admin-only; avoid roles, accounts, or SaaS abstractions.
-- SQLite for durable settings, snapshots, price history, and currency observations.
-- One process and one Docker container; no brokers, heavy databases, or separate workers.
-- Telegram as the only v1/v2 interface.
-- Immutable dataclass + `dataclasses.replace` pattern for config mutations.
-- Pure function helpers near related code; focused modules for cross-cutting domains.
+| Milestone | Phases | Plans | Tests | Status |
+|-----------|--------|-------|-------|--------|
+| v1.0 MVP | 5 | 7 | 58 | Shipped |
+| v2.0 Production Hardening | 3 | 3 | 72 | Shipped |
+| v3.0 Competition & Discovery | 3 | 3 | 87 | Shipped |
+| v4.0 Tech Debt Cleanup | 1 | 1 | 87 | Shipped |
+| v5.0 Recommendation & Polish | 2 | 2 | 89 | Shipped |
 
-### Pending Todos
+### Key decisions
+- Single-user/admin-only; SQLite; one container; Telegram-only UI
+- Fuzzy hotel name matching (difflib, 0.6 ratio)
+- WAL mode enabled for SQLite
+- Telegram retry with exponential backoff (3 attempts)
+- Max 3 departure dates enforced
+- AI recommendation requires 5+ unique check timestamps
 
-None yet — milestone just initialized.
-
-### Blockers/Concerns
-
-None at milestone start.
+### Pending
+- None

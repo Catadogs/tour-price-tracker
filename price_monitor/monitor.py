@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import os
@@ -53,20 +54,20 @@ class MonitorConfig:
     interval_seconds: int
     run_once: bool
     db_path: Path
-    state_path: Path
-    settings_path: Path
     strong_diff_rub: int
     strong_diff_percent: float
     telegram_bot_token: str | None
     telegram_chat_id: str | None
     target_price_rub: int | None
-    history_path: Path
     currency_source_url: str
     currency_alert_threshold_pct: float
     currency_check_hours: int
     price_history_retention_days: int
     chart_interval_hours: int
     anomaly_preset: str  # "conservative" | "balanced" | "aggressive"
+    state_path: Path | None = None
+    settings_path: Path | None = None
+    history_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> "MonitorConfig":
@@ -84,14 +85,14 @@ class MonitorConfig:
             interval_seconds=int(os.getenv("BG_CHECK_INTERVAL_SECONDS", "3600")),
             run_once=os.getenv("BG_RUN_ONCE", "0") == "1",
             db_path=Path(os.getenv("BG_DB_PATH", "/data/price_monitor.sqlite3")),
-            state_path=Path(os.getenv("BG_STATE_PATH", "/data/last_snapshot.json")),
-            settings_path=Path(os.getenv("BG_SETTINGS_PATH", "/data/settings.json")),
+            state_path=Path(os.getenv("BG_STATE_PATH", "")) or None,
+            settings_path=Path(os.getenv("BG_SETTINGS_PATH", "")) or None,
             strong_diff_rub=int(os.getenv("BG_STRONG_DIFF_RUB", "20000")),
             strong_diff_percent=float(os.getenv("BG_STRONG_DIFF_PERCENT", "7")),
             telegram_bot_token=empty_to_none(os.getenv("TELEGRAM_BOT_TOKEN")),
             telegram_chat_id=empty_to_none(os.getenv("TELEGRAM_CHAT_ID")),
             target_price_rub=int(target_raw) if target_raw else None,
-            history_path=Path(os.getenv("BG_HISTORY_PATH", "/data/price_history.json")),
+            history_path=Path(os.getenv("BG_HISTORY_PATH", "")) or None,
             currency_source_url=os.getenv(
                 "BG_CURRENCY_SOURCE_URL",
                 "https://www.cbr-xml-daily.ru/daily_json.js",
@@ -119,6 +120,21 @@ class ExternalPrice:
     hotel_name: str | None
     price_rub: int | None
     url: str
+
+
+@dataclass(frozen=True)
+class TargetResult:
+    target_name: str
+    provider: str
+    hotel_name: str | None
+    best_by_date: dict[str, dict[int, Offer]] | None
+    external_price: ExternalPrice | None
+
+
+@dataclass(frozen=True)
+class HotelGroup:
+    hotel_name: str
+    results: list[TargetResult]
 
 
 ANOMALY_PRESETS: dict[str, dict[str, object]] = {
@@ -257,7 +273,24 @@ def effective_config(config: MonitorConfig) -> MonitorConfig:
             int,
         )
 
-    return replace(config, **updates)
+    config = replace(config, **updates)
+
+    # Enforce max 3 departure days
+    try:
+        start = parse_ru_date(config.departure_from)
+        end = parse_ru_date(config.departure_to)
+        if (end - start).days > 2:
+            clamped = (start + (end - start).__class__(days=2)).strftime("%d.%m.%Y")
+            logging.warning(
+                "Departure range clamped from %s to %s (max 3 days)",
+                config.departure_to,
+                clamped,
+            )
+            config = replace(config, departure_to=clamped)
+    except ValueError:
+        pass
+
+    return config
 
 
 def _apply_runtime_setting(
@@ -372,9 +405,7 @@ def format_report(
         lines.extend(
             [
                 "",
-                "✅ *Лучшая цена*",
-                f"• `{overall.departure_date}`, `{overall.nights}` ночей",
-                f"• *{format_price(overall)}* [Забронировать]({overall.booking_url})",
+                f"✅ *Лучшая*: `{overall.departure_date}`, `{overall.nights}`н — *{format_price(overall)}* [Посмотреть]({overall.booking_url})",
             ]
         )
     else:
@@ -383,15 +414,24 @@ def format_report(
         return "\n".join(lines)
 
     lines.extend(["", "📊 *По датам вылета*"])
-    for departure_date, by_nights in best.items():
-        lines.append("")
-        lines.append(f"*{departure_date}*")
+    last_best: int | None = None
+    dates = list(best.items())
+    for departure_date, by_nights in dates:
+        # Get best price for this date
+        date_best = min(o.price_rub for o in by_nights.values())
+        # Skip if within 10% of previous date
+        if last_best is not None and abs(date_best - last_best) / last_best * 100 < 10:
+            continue
+        last_best = date_best
+
+        night_lines: list[str] = []
         for nights in config.nights:
             offer = by_nights.get(nights)
             if offer:
-                lines.append(f"• `{nights}` ночей: `{format_price(offer)}` [Бронь]({offer.booking_url})")
-            else:
-                lines.append(f"• `{nights}` ночей: не найдено")
+                night_lines.append(f"• `{nights}`н: `{format_price(offer)}` [Смотреть]({offer.booking_url})")
+        if night_lines:
+            lines.append(f"\n*{departure_date}*")
+            lines.extend(night_lines)
 
     anomalies = format_duration_anomalies(best, config)
     if anomalies:
@@ -474,34 +514,76 @@ def format_strong_diff_line(
     ).replace(",", " ")
 
 
-def format_trend_report(db_path: Path) -> str:
-    """Format compact trend summary from price history."""
+def format_trend_report(db_path: Path, config: MonitorConfig | None = None) -> str:
+    """Format compact trend summary from price history.
+
+    Only shows dates within configured departure range.
+    Adjacent dates (±1 day) are shown only if price differs >10% from in-range dates.
+    """
     grouped = storage.load_price_history_grouped(db_path)
     if not grouped:
         return "📊 *Тренды цен*\n\nНет данных для анализа. Нужно несколько проверок."
 
+    # Determine allowed dates: configured range + optional ±1 day
+    allowed_dates: set[str] = set()
+    adjacent_dates: set[str] = set()
+    if config:
+        from datetime import timedelta
+        start = parse_ru_date(config.departure_from)
+        end = parse_ru_date(config.departure_to)
+        d = start
+        while d <= end:
+            allowed_dates.add(d.strftime("%d.%m.%Y"))
+            d += timedelta(days=1)
+        # Adjacent dates ±1
+        prev_day = (start - timedelta(days=1)).strftime("%d.%m.%Y")
+        next_day = (end + timedelta(days=1)).strftime("%d.%m.%Y")
+        adjacent_dates = {prev_day, next_day} - allowed_dates
+
     lines: list[str] = ["📊 *Тренды цен*\n"]
     for target_name, by_date in grouped.items():
         lines.append(f"🏨 *{target_name}*")
-        for date, by_nights in by_date.items():
+        shown = 0
+        for date, by_nights in sorted(by_date.items(), key=lambda kv: _safe_parse_date(kv[0])):
+            if config:
+                if date not in allowed_dates and date not in adjacent_dates:
+                    continue
+
             for nights, price_points in by_nights.items():
                 if len(price_points) < 2:
                     continue
                 prices = [p[1] for p in price_points[-6:]]
                 delta = prices[-1] - prices[0]
                 pct = abs(delta) / prices[0] * 100 if prices[0] else 0
-                if pct < 1:
-                    direction = "→ стабильно"
-                elif delta < 0:
-                    direction = f"↓ {pct:.1f}%"
+
+                # For adjacent dates, skip if change < 10%
+                if config and date in adjacent_dates and pct < 10:
+                    continue
+
+                if delta < 0:
+                    direction = f"↓ -{pct:.0f}%"
+                elif delta > 0:
+                    direction = f"↑ +{pct:.0f}%"
                 else:
-                    direction = f"↑ +{pct:.1f}%"
+                    direction = "→ 0%"
                 current = prices[-1]
+                date_label = f"🟡 {date}" if date in adjacent_dates else date
                 lines.append(
-                    f"  {date}, {nights}н: *{format_rub(current)}* {direction}"
+                    f"  {date_label}, {nights}н: *{format_rub(current)}* {direction}"
                 )
+                shown += 1
+        if shown == 0:
+            lines.append("  _нет данных_")
         lines.append("")
     return "\n".join(lines)
+
+
+def _safe_parse_date(value: str) -> datetime:
+    """Parse date or return epoch for invalid dates (used for sorting)."""
+    try:
+        return parse_ru_date(value)
+    except ValueError:
+        return datetime(1970, 1, 1)
 
 
 def snapshot(
@@ -573,24 +655,32 @@ def compute_trend(history: dict[str, list[list]], key: str, window: int = 6) -> 
 def format_new_minimums(
     current_snapshot: dict[str, dict[str, object]],
     history: dict[str, list[list]],
-) -> str | None:
+) -> tuple[str | None, set[str]]:
+    """Detect new historical minimum prices.
+
+    Returns (formatted_block, set_of_affected_keys).
+    The key set is used to avoid duplicate reporting in format_changes.
+    """
     lines: list[str] = []
+    affected_keys: set[str] = set()
     for key, item in current_snapshot.items():
         prev_min = historical_min_price(history, key)
         if prev_min is None:
             continue
         current_price = int(item["price_rub"])
         if current_price < prev_min:
+            affected_keys.add(key)
             booking_url = str(item.get("booking_url") or "")
-            link = f" [Забронировать]({booking_url})" if booking_url else ""
+            link = f" [Посмотреть]({booking_url})" if booking_url else ""
+            target_name = key.split("|", 1)[0]
             trend = compute_trend(history, key)
             trend_str = f", {trend}" if trend else ""
             lines.append(
-                f"🏆 Исторический минимум: `{item['departure_date']}`, "
+                f"🏆 `{target_name}`: `{item['departure_date']}`, "
                 f"`{item['nights']}` ночей — *{format_rub(current_price)}*"
                 f"{trend_str}{link}"
             )
-    return "\n".join(lines) if lines else None
+    return ("\n".join(lines) if lines else None, affected_keys)
 
 
 def format_target_alerts(
@@ -602,7 +692,7 @@ def format_target_alerts(
         price = int(item["price_rub"])
         if price <= target_price_rub:
             booking_url = str(item.get("booking_url") or "")
-            link = f" [Забронировать]({booking_url})" if booking_url else ""
+            link = f" [Посмотреть]({booking_url})" if booking_url else ""
             lines.append(
                 f"🎯 Цена достигла цели {format_rub(target_price_rub)}: "
                 f"`{item['departure_date']}`, `{item['nights']}` ночей — "
@@ -628,13 +718,17 @@ def adaptive_interval(departure_from: str, base_interval: int) -> int:
 def format_changes(
     previous: dict[str, dict[str, object]],
     current: dict[str, dict[str, object]],
+    skip_keys: set[str] | None = None,
 ) -> str | None:
     if not previous:
         return None
 
+    skip = skip_keys or set()
     lines: list[str] = []
 
     for identity, item in current.items():
+        if identity in skip:
+            continue  # Already reported as historical minimum
         old = previous.get(identity)
         if old is None:
             lines.append(
@@ -651,7 +745,7 @@ def format_changes(
             marker = "📉" if fell else "📈"
             direction = "упала" if fell else "выросла"
             booking_url = str(item.get("booking_url") or "")
-            link = f" [Забронировать]({booking_url})" if booking_url and fell else ""
+            link = f" [Посмотреть]({booking_url})" if booking_url and fell else ""
             diff = old_price - new_price if fell else new_price - old_price
             sign = "-" if fell else "+"
             lines.append(
@@ -660,6 +754,83 @@ def format_changes(
             )
 
     return "\n".join(lines) if lines else None
+
+
+def format_new_arrivals(
+    previous: dict[str, dict[str, object]],
+    current: dict[str, dict[str, object]],
+) -> tuple[str | None, str | None]:
+    """Detect new departure dates and new hotel/room combos vs previous snapshot.
+
+    Returns (new_dates_block, new_hotels_block) — each str or None.
+    """
+    if not previous:
+        return None, None
+
+    # --- New dates ---
+    prev_dates: set[str] = set()
+    cur_dates: set[str] = set()
+
+    for item in previous.values():
+        d = str(item.get("departure_date", ""))
+        if d and d != "external":
+            prev_dates.add(d)
+    for item in current.values():
+        d = str(item.get("departure_date", ""))
+        if d and d != "external":
+            cur_dates.add(d)
+
+    new_dates = cur_dates - prev_dates
+
+    date_lines: list[str] = []
+    if new_dates:
+        date_lines = ["📅 *Новые даты вылета*"]
+        for date in sorted(new_dates, key=parse_ru_date):
+            best_price = None
+            for item in current.values():
+                if str(item.get("departure_date")) == date:
+                    p = int(item["price_rub"])
+                    if best_price is None or p < best_price:
+                        best_price = p
+            price_str = format_rub(best_price) if best_price else "?"
+            date_lines.append(f"  • {date}: от *{price_str}*")
+
+    # --- New hotels/rooms on existing dates ---
+    prev_ids: dict[str, set[str]] = {}
+    cur_ids: dict[str, set[str]] = {}
+
+    for key, item in previous.items():
+        d = str(item.get("departure_date", ""))
+        if d and d != "external":
+            prev_ids.setdefault(d, set()).add(key)
+    for key, item in current.items():
+        d = str(item.get("departure_date", ""))
+        if d and d != "external":
+            cur_ids.setdefault(d, set()).add(key)
+
+    room_lines: list[str] = []
+    for date in sorted(cur_ids, key=parse_ru_date):
+        if date in new_dates:
+            continue  # Entirely new dates are already reported above
+        prev_set = prev_ids.get(date, set())
+        new_keys = cur_ids[date] - prev_set
+        if new_keys:
+            if not room_lines:
+                room_lines = ["🏩 *Новые отели/номера*"]
+            for key in sorted(new_keys):
+                item = current.get(key)
+                if item:
+                    nights = item.get("nights", "?")
+                    price = int(item["price_rub"])
+                    room = item.get("room", "")
+                    room_lines.append(
+                        f"  • {date}, {nights}н: {room} — *{format_rub(price)}*"
+                    )
+
+    return (
+        "\n".join(date_lines) if date_lines else None,
+        "\n".join(room_lines) if room_lines else None,
+    )
 
 
 def fetch_html(url: str) -> str:
@@ -787,24 +958,47 @@ def telegram_post(
     method: str,
     payload: dict[str, object],
     timeout: int = 20,
+    max_retries: int = 3,
 ) -> dict[str, object]:
-    response = requests.post(
-        f"https://api.telegram.org/bot{token}/{method}",
-        timeout=timeout,
-        json=payload,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Telegram API {method} failed: HTTP {response.status_code}, "
-            f"body={response.text}"
-        )
-    return response.json()
+    max_retries_count = max(max_retries, 0)
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    for attempt in range(max_retries_count + 1):
+        try:
+            response = requests.post(url, timeout=timeout, json=payload)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt >= max_retries_count:
+                raise RuntimeError(
+                    f"Telegram API {method} failed after {max_retries_count + 1} attempts: {exc}"
+                ) from exc
+            logging.warning(
+                "Telegram %s attempt %d/%d: %s, retrying in %ds",
+                method, attempt + 1, max_retries_count + 1, exc, 2 ** attempt,
+            )
+            time.sleep(2 ** attempt)
+            continue
+        if response.status_code >= 500 and attempt < max_retries_count:
+            logging.warning(
+                "Telegram %s attempt %d/%d: HTTP %d, retrying in %ds",
+                method, attempt + 1, max_retries_count + 1,
+                response.status_code, 2 ** attempt,
+            )
+            time.sleep(2 ** attempt)
+            continue
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Telegram API {method} failed: HTTP {response.status_code}, "
+                f"body={response.text}"
+            )
+        return response.json()
+
+    raise RuntimeError(f"Telegram API {method} failed after all retries")
 
 
 def run_check(config: MonitorConfig) -> str:
     active_config = effective_config(config)
     reports: list[str] = []
     current_snapshot: dict[str, dict[str, object]] = {}
+    target_results: list[TargetResult] = []
 
     for target in load_search_targets(active_config):
         # Rewrite date parameters in Biblio-Globus URLs to match current config
@@ -831,6 +1025,13 @@ def run_check(config: MonitorConfig) -> str:
             best = best_by_departure_and_nights(offers)
             reports.append(format_report(best, target_config, target.name, hotel_name))
             current_snapshot.update(snapshot(best, target.name))
+            target_results.append(TargetResult(
+                target_name=target.name,
+                provider="Библио-Глобус",
+                hotel_name=hotel_name,
+                best_by_date=best,
+                external_price=None,
+            ))
             continue
 
         external_price = parse_external_price(html, target.url)
@@ -842,16 +1043,23 @@ def run_check(config: MonitorConfig) -> str:
                 "price_rub": external_price.price_rub,
                 "hotel": external_price.hotel_name or target.name,
             }
+        target_results.append(TargetResult(
+            target_name=target.name,
+            provider=external_price.provider,
+            hotel_name=external_price.hotel_name,
+            best_by_date=None,
+            external_price=external_price,
+        ))
 
     previous_snapshot = load_snapshot(active_config)
     history = load_price_history(active_config)
 
-    changes = format_changes(previous_snapshot, current_snapshot)
+    minimums, minimum_keys = format_new_minimums(current_snapshot, history)
+
+    changes = format_changes(previous_snapshot, current_snapshot, minimum_keys)
     # Suppress notification when all changes are new offers (first run after empty snapshot)
     if changes and all(line.startswith("🆕") for line in changes.splitlines()):
         changes = None
-
-    minimums = format_new_minimums(current_snapshot, history)
 
     ts = datetime.now().strftime("%Y-%m-%dT%H:%M")
     append_price_history(active_config, current_snapshot, ts)
@@ -863,12 +1071,30 @@ def run_check(config: MonitorConfig) -> str:
         else None
     )
 
+    new_dates_block, new_hotels_block = format_new_arrivals(previous_snapshot, current_snapshot)
+
     report = "\n\n".join(reports)
+
+    # Cross-provider comparison
+    groups = match_hotels_across_providers(target_results)
+    comparison = format_comparison(groups)
+    if comparison:
+        report = f"{report}\n\n{comparison}"
+
+    # Cross-search comparison (different BG hotels)
+    cross = format_cross_search_comparison(target_results)
+    if cross:
+        report = f"{report}\n\n{cross}"
+
     alerts: list[str] = []
     if minimums:
         alerts.append(f"🏆 *Исторические минимумы*\n{minimums}")
     if target_alerts:
         alerts.append(f"🎯 *Цель достигнута*\n{target_alerts}")
+    if new_dates_block:
+        alerts.append(new_dates_block)
+    if new_hotels_block:
+        alerts.append(new_hotels_block)
     if changes:
         alerts.append(f"🔔 *Изменения с прошлой проверки*\n{changes}")
 
@@ -952,7 +1178,7 @@ class TelegramControlBot:
         elif text.startswith("/status"):
             self.send_message(chat_id, format_settings(effective_config(self.config)), reply_markup=main_keyboard())
         elif text.startswith("/trend"):
-            report = format_trend_report(self.config.db_path)
+            report = format_trend_report(self.config.db_path, effective_config(self.config))
             self.send_message(chat_id, report, reply_markup=main_keyboard())
         else:
             self.send_message(chat_id, "Используй кнопки или команду /help.", reply_markup=main_keyboard())
@@ -977,8 +1203,12 @@ class TelegramControlBot:
         if data == "check":
             self.run_manual_check(chat_id)
         elif data == "trend":
-            report = format_trend_report(self.config.db_path)
+            report = format_trend_report(self.config.db_path, effective_config(self.config))
             self.send_message(chat_id, report, reply_markup=main_keyboard())
+        elif data == "recommend":
+            active = effective_config(self.config)
+            rec = _generate_recommendation_from_db(active)
+            self.send_message(chat_id, rec, reply_markup=main_keyboard())
         elif data == "settings":
             self.send_message(chat_id, format_settings(effective_config(self.config)), reply_markup=settings_keyboard())
         elif data == "add_filter":
@@ -1027,6 +1257,9 @@ class TelegramControlBot:
         elif data == "set_retention":
             self.pending[chat_id] = "set_retention"
             self.send_message(chat_id, "Отправь срок хранения истории цен в днях (например: 90).")
+        elif data == "set_reference":
+            self.pending[chat_id] = "set_reference"
+            self.send_message(chat_id, "Отправь референсную цену в RUB (например: 250000).\nЭто твоя оценка — сколько должен стоить тур.")
         elif data == "clear_target":
             settings = load_runtime_settings(self.config)
             settings["target_price_rub"] = None
@@ -1071,11 +1304,39 @@ class TelegramControlBot:
                 if any(isinstance(item, dict) and item.get("url") == url for item in searches):
                     self.send_message(chat_id, "Эта ссылка уже отслеживается.", reply_markup=main_keyboard())
                     return
-                name = f"{provider_from_url(url)} {len(searches) + 1}"
+                provider = provider_from_url(url)
+                name = f"{provider} {len(searches) + 1}"
                 searches.append({"name": name, "url": url, "room_filters": []})
                 settings["searches"] = searches
                 save_runtime_settings(self.config, settings)
-                self.send_message(chat_id, f"Добавлен {name}. Нажми Проверить сейчас.", reply_markup=main_keyboard())
+
+                # Auto-add Level.Travel and Travelata searches for the same hotel
+                added_extra = []
+                if is_bgoperator_url(url):
+                    active = effective_config(self.config)
+                    try:
+                        html = fetch_html(url)
+                        hotel = extract_hotel_name(html, url)
+                        if hotel:
+                            # Generate search URLs for competitors
+                            lt_url = _build_leveltravel_url(hotel, active.departure_from)
+                            if lt_url and not any(isinstance(s, dict) and s.get("url") == lt_url for s in searches):
+                                searches.append({"name": f"Level.Travel {len(searches) + 1}", "url": lt_url, "room_filters": []})
+                                added_extra.append("Level.Travel")
+                            tt_url = _build_travelata_url(hotel, active.departure_from)
+                            if tt_url and not any(isinstance(s, dict) and s.get("url") == tt_url for s in searches):
+                                searches.append({"name": f"Travelata {len(searches) + 1}", "url": tt_url, "room_filters": []})
+                                added_extra.append("Travelata")
+                        settings["searches"] = searches
+                        save_runtime_settings(self.config, settings)
+                    except Exception:
+                        pass  # Auto-search failed, BG search is still added
+
+                msg = f"Добавлен {name}."
+                if added_extra:
+                    msg += f"\nАвтоматически добавлены: {', '.join(added_extra)}."
+                msg += " Нажми Проверить сейчас."
+                self.send_message(chat_id, msg, reply_markup=main_keyboard())
             elif action == "set_dates":
                 start, end = parse_date_range_text(text)
                 settings["departure_from"] = start
@@ -1112,6 +1373,13 @@ class TelegramControlBot:
                 settings["price_history_retention_days"] = days
                 save_runtime_settings(self.config, settings)
                 self.send_message(chat_id, f"Срок хранения истории: {days} дн.", reply_markup=main_keyboard())
+            elif action == "set_reference":
+                ref = int(re.sub(r"\D", "", text))
+                if ref <= 0:
+                    raise ValueError("цена должна быть > 0")
+                settings["reference_price_rub"] = ref
+                save_runtime_settings(self.config, settings)
+                self.send_message(chat_id, f"Ориентир цены: {format_rub(ref)}", reply_markup=main_keyboard())
         except ValueError as exc:
             self.send_message(chat_id, f"Не удалось сохранить настройку: {exc}", reply_markup=main_keyboard())
         except Exception as exc:
@@ -1164,7 +1432,10 @@ def main_keyboard() -> dict[str, object]:
     return {
         "inline_keyboard": [
             [{"text": "Проверить сейчас", "callback_data": "check"}],
-            [{"text": "📊 Тренды", "callback_data": "trend"}],
+            [
+                {"text": "📊 Тренды", "callback_data": "trend"},
+                {"text": "🤖 Совет", "callback_data": "recommend"},
+            ],
             [{"text": "Настройки", "callback_data": "settings"}],
             [
                 {"text": "Добавить отель/поиск", "callback_data": "add_search"},
@@ -1216,8 +1487,12 @@ def settings_keyboard() -> dict[str, object]:
             ],
             [
                 {"text": "🗑️ Хранение истории", "callback_data": "set_retention"},
+                {"text": "💵 Ориентир цены", "callback_data": "set_reference"},
             ],
-            [{"text": "📊 Тренды", "callback_data": "trend"}],
+            [
+                {"text": "📊 Тренды", "callback_data": "trend"},
+                {"text": "🤖 Совет", "callback_data": "recommend"},
+            ],
             [{"text": "Проверить сейчас", "callback_data": "check"}],
         ]
     }
@@ -1228,6 +1503,9 @@ def format_settings(config: MonitorConfig) -> str:
     targets = load_search_targets(config)
     search_lines = "\n".join(f"  {index}. {target.name}" for index, target in enumerate(targets, start=1))
     target_str = format_rub(config.target_price_rub) if config.target_price_rub else "не задана"
+    settings = load_runtime_settings(config)
+    ref_raw = settings.get("reference_price_rub")
+    ref_str = format_rub(int(ref_raw)) if isinstance(ref_raw, (int, float)) and int(ref_raw) > 0 else "не задан"
     try:
         days_left = (parse_ru_date(config.departure_from) - datetime.now()).days
         days_str = f"{days_left} дн."
@@ -1247,8 +1525,237 @@ def format_settings(config: MonitorConfig) -> str:
         f"Хранение истории: {config.price_history_retention_days} дн.\n"
         f"Частота проверки: {format_interval(config.interval_seconds)}\n"
         f"Целевая цена: {target_str}\n"
+        f"Ориентир цены: {ref_str}\n"
         f"Поиски:\n{search_lines}"
     )
+
+
+def _normalize_hotel_name(name: str) -> str:
+    """Lowercase and strip special chars for fuzzy matching."""
+    return re.sub(r"[^\w\s]", "", name.lower()).strip()
+
+
+def _build_leveltravel_url(hotel_name: str, date_from: str) -> str | None:
+    """Build a Level.Travel search URL for the given hotel and date."""
+    try:
+        dt = parse_ru_date(date_from)
+        # Level.Travel uses date_from in their search params
+        from_str = dt.strftime("%d.%m.%Y")
+        to_date = dt + (dt.replace(day=1) - dt.replace(day=1)).__class__(days=10)
+        to_str = to_date.strftime("%d.%m.%Y")
+        return f"https://level.travel/hotels?q={requests.utils.requote_uri(hotel_name)}"
+    except Exception:
+        return None
+
+
+def _build_travelata_url(hotel_name: str, date_from: str) -> str | None:
+    """Build a Travelata search URL for the given hotel."""
+    try:
+        return f"https://travelata.ru/search/?q={requests.utils.requote_uri(hotel_name)}"
+    except Exception:
+        return None
+
+
+def match_hotels_across_providers(results: list[TargetResult]) -> list[HotelGroup]:
+    """Group TargetResults by fuzzy-matched hotel name.
+
+    Only returns groups with 2+ providers.
+    """
+    named = [(r, _normalize_hotel_name(r.hotel_name))
+             for r in results if r.hotel_name]
+    if len(named) < 2:
+        return []
+
+    groups: list[list[TargetResult]] = []
+    used: set[int] = set()
+
+    for i, (r1, name1) in enumerate(named):
+        if i in used:
+            continue
+        group = [r1]
+        used.add(i)
+        for j, (r2, name2) in enumerate(named):
+            if j in used:
+                continue
+            if difflib.SequenceMatcher(None, name1, name2).ratio() > 0.6:
+                group.append(r2)
+                used.add(j)
+        groups.append(group)
+
+    return [
+        HotelGroup(hotel_name=group[0].hotel_name or "Unknown", results=group)
+        for group in groups
+        if len(group) >= 2
+    ]
+
+
+def format_comparison(groups: list[HotelGroup]) -> str | None:
+    """Format cross-provider price comparison block."""
+    if not groups:
+        return None
+
+    provider_icons = {
+        "Библио-Глобус": "🔵",
+        "Level.Travel": "🟢",
+        "Travelata": "🟠",
+    }
+
+    lines: list[str] = ["🌐 *Сравнение цен*"]
+
+    for group in groups:
+        lines.append(f"\n🏩 *{group.hotel_name}*")
+        for r in group.results:
+            icon = provider_icons.get(r.provider, "⚪")
+
+            if r.best_by_date:
+                overall = find_overall_best(r.best_by_date)
+                if overall:
+                    lines.append(
+                        f"  {icon} {r.provider}: "
+                        f"от *{format_rub(overall.price_rub)}* "
+                        f"({overall.departure_date}, {overall.nights}н)"
+                    )
+                else:
+                    lines.append(f"  {icon} {r.provider}: предложений не найдено")
+            elif r.external_price and r.external_price.price_rub:
+                lines.append(
+                    f"  {icon} {r.provider}: "
+                    f"от *{format_rub(r.external_price.price_rub)}*"
+                )
+            else:
+                lines.append(f"  {icon} {r.provider}: цена не найдена")
+
+    return "\n".join(lines)
+
+
+def format_cross_search_comparison(
+    target_results: list[TargetResult],
+) -> str | None:
+    """Compare best prices across multiple Bibli-Globus searches (different hotels)."""
+    bg_results = [r for r in target_results if r.best_by_date]
+    if len(bg_results) < 2:
+        return None
+
+    lines: list[str] = ["🏨 *Сравнение отелей*"]
+    for r in bg_results:
+        hotel = r.hotel_name or r.target_name
+        overall = find_overall_best(r.best_by_date) if r.best_by_date else None
+        if overall:
+            lines.append(
+                f"  • *{hotel}*: {format_rub(overall.price_rub)} "
+                f"({overall.departure_date}, {overall.nights}н)"
+            )
+        else:
+            lines.append(f"  • *{hotel}*: нет предложений")
+
+def _generate_recommendation_from_db(config: MonitorConfig) -> str:
+    """Generate buy/wait recommendation from DB snapshot + history + currency."""
+    snapshot = load_snapshot(config)
+    grouped = storage.load_price_history_grouped(config.db_path)
+
+    days_left = 999
+    try:
+        days_left = (parse_ru_date(config.departure_from) - datetime.now()).days
+    except ValueError:
+        pass
+
+    lines: list[str] = ["🤖 *Рекомендация*"]
+
+    # Currency info
+    try:
+        usd_obs = storage.load_currency_observations(config.db_path, "USD/RUB", limit=2)
+        if len(usd_obs) >= 2:
+            usd_now = float(usd_obs[0][1])
+            usd_prev = float(usd_obs[1][1])
+            usd_pct = (usd_now - usd_prev) / usd_prev * 100
+            if abs(usd_pct) > 0.3:
+                arrow = "📈" if usd_pct > 0 else "📉"
+                lines.append(f"💱 USD/RUB: {usd_now:.1f} ({arrow} {usd_pct:+.1f}%)")
+            else:
+                lines.append(f"💱 USD/RUB: {usd_now:.1f} (→ стабилен)")
+    except Exception:
+        pass
+
+    lines.append(f"До вылета: *{days_left} дн.*\n")
+
+    # Per-target analysis
+    targets = load_search_targets(config)
+    for target in targets:
+        if not is_bgoperator_url(target.url):
+            continue
+
+        # Get current best price from snapshot
+        best_price = None
+        best_date = ""
+        best_nights = 0
+        for key, item in snapshot.items():
+            if not key.startswith(target.name + "|"):
+                continue
+            p = int(item["price_rub"])
+            if best_price is None or p < best_price:
+                best_price = p
+                best_date = str(item.get("departure_date", ""))
+                best_nights = int(item.get("nights", 0))
+
+        if best_price is None:
+            lines.append(f"🏨 *{target.name}*\n  Нет данных\n")
+            continue
+
+        # Count unique check timestamps for this target
+        timestamps: set[str] = set()
+        by_date = grouped.get(target.name, {})
+        for date, by_nights in by_date.items():
+            for nights, points in by_nights.items():
+                for p in points:
+                    timestamps.add(p[0][:13])  # "2026-05-04T10"
+        check_count = len(timestamps)
+
+        # Find historical min from grouped history
+        hist_min = None
+        for date, by_nights in by_date.items():
+            for nights, points in by_nights.items():
+                if points:
+                    m = min(p[1] for p in points)
+                    if hist_min is None or m < hist_min:
+                        hist_min = m
+
+        # Get reference price from settings if set
+        ref_price = None
+        settings = load_runtime_settings(config)
+        ref_raw = settings.get("reference_price_rub")
+        if isinstance(ref_raw, (int, float)) and int(ref_raw) > 0:
+            ref_price = int(ref_raw)
+
+        # Verdict
+        verdict = ""
+        if check_count < 5:
+            verdict = f"📊 *Мало данных* — {check_count} провер. Нужно минимум 5 для оценки."
+        elif hist_min and best_price <= hist_min:
+            verdict = "🎯 *БРАТЬ* — исторический минимум"
+        elif days_left < 14:
+            verdict = "⏰ *ПОРА* — меньше 2 недель"
+        elif hist_min:
+            pct = (best_price - hist_min) / hist_min * 100
+            if pct < 3:
+                verdict = f"👍 *МОЖНО БРАТЬ* — {pct:.0f}% выше мин. ({format_rub(hist_min)})"
+            elif pct < 10:
+                verdict = f"⏳ *ЖДАТЬ* — {pct:.0f}% выше мин. ({format_rub(hist_min)})"
+            else:
+                verdict = f"🔴 *ДОРОГО* — {pct:.0f}% выше мин. ({format_rub(hist_min)})"
+        else:
+            verdict = "📊 *НЕТ ДАННЫХ*"
+
+        lines.append(f"🏨 *{target.name}*\n  Цена: *{format_rub(best_price)}* ({best_date}, {best_nights}н)")
+
+        if ref_price:
+            ref_pct = (best_price - ref_price) / ref_price * 100
+            arrow = "📈" if best_price > ref_price else "📉"
+            lines.append(f"  Ориентир: {format_rub(ref_price)} ({arrow} {ref_pct:+.0f}%)")
+
+        lines.append(f"  {verdict}\n")
+
+    lines.append("_На основе истории цен и курса. Не совет._")
+    return "\n".join(lines)
 
 
 def parse_date_range_text(text: str) -> tuple[str, str]:
@@ -1256,8 +1763,12 @@ def parse_date_range_text(text: str) -> tuple[str, str]:
     if len(dates) != 2:
         raise ValueError("expected two dates in dd.mm.yyyy format")
     start, end = dates
-    if parse_ru_date(start) > parse_ru_date(end):
+    parsed_start = parse_ru_date(start)
+    parsed_end = parse_ru_date(end)
+    if parsed_start > parsed_end:
         raise ValueError("start date must be before end date")
+    if (parsed_end - parsed_start).days > 2:
+        raise ValueError("диапазон не больше 3 дней")
     return start, end
 
 
@@ -1311,16 +1822,30 @@ def send_chart(config: MonitorConfig, chart_path: Path, chat_id: str | None = No
     if not target_chat_id:
         return
     with chart_path.open("rb") as f:
-        response = requests.post(
-            f"https://api.telegram.org/bot{config.telegram_bot_token}/sendPhoto",
-            data={"chat_id": target_chat_id},
-            files={"photo": (chart_path.name, f, "image/png")},
-            timeout=30,
-        )
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Telegram sendPhoto failed: HTTP {response.status_code}, body={response.text}"
-        )
+        chart_data = f.read()
+
+    url = f"https://api.telegram.org/bot{config.telegram_bot_token}/sendPhoto"
+    for attempt in range(4):  # 3 retries
+        try:
+            response = requests.post(
+                url,
+                data={"chat_id": target_chat_id},
+                files={"photo": (chart_path.name, chart_data, "image/png")},
+                timeout=30,
+            )
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt >= 3:
+                raise RuntimeError(f"Telegram sendPhoto failed after 4 attempts: {exc}")
+            time.sleep(2 ** attempt)
+            continue
+        if response.status_code >= 500 and attempt < 3:
+            time.sleep(2 ** attempt)
+            continue
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Telegram sendPhoto failed: HTTP {response.status_code}, body={response.text}"
+            )
+        return
 
 
 def _send_chart_if_needed(
@@ -1393,6 +1918,23 @@ def _prune_if_needed(
     return now
 
 
+def _vacuum_if_needed(
+    config: MonitorConfig,
+    last_vacuum: datetime | None,
+    interval_hours: int = 168,
+) -> datetime | None:
+    """Run VACUUM on the database if enough time has passed."""
+    now = datetime.now()
+    if last_vacuum and (now - last_vacuum).total_seconds() < interval_hours * 3600:
+        return last_vacuum
+    try:
+        storage.vacuum_db(config.db_path)
+        logging.info("Database VACUUM completed")
+    except Exception:
+        logging.exception("Database VACUUM failed")
+    return now
+
+
 def main() -> int:
     configure_logging()
     config = MonitorConfig.from_env()
@@ -1402,6 +1944,7 @@ def main() -> int:
 
     last_currency_check: datetime | None = None
     last_prune: datetime | None = None
+    last_vacuum: datetime | None = None
     last_chart_sent: datetime | None = None
 
     while True:
@@ -1437,6 +1980,7 @@ def main() -> int:
 
         active = effective_config(config)
         last_prune = _prune_if_needed(config, active.price_history_retention_days, last_prune)
+        last_vacuum = _vacuum_if_needed(config, last_vacuum)
         if active.chart_interval_hours > 0:
             last_chart_sent = _send_chart_if_needed(config, active.chart_interval_hours, last_chart_sent)
 

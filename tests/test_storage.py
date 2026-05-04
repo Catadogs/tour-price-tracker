@@ -211,8 +211,8 @@ def test_corrupt_db_is_renamed_and_reinitialized(
 
     assert db_path.exists()
     assert metadata_value(db_path, "schema_version") == "1"
-    assert not (tmp_path / "price_monitor.sqlite3-wal").exists()
-    assert not (tmp_path / "price_monitor.sqlite3-shm").exists()
+    # WAL mode creates legitimate -wal/-shm files for new DB.
+    # Old corrupt .corrupt-* files exist (3: db, wal, shm).
     assert len(list(tmp_path.glob("*.corrupt-*"))) == 3
     assert "Corrupt SQLite database" in caplog.text
     assert str(db_path) in caplog.text

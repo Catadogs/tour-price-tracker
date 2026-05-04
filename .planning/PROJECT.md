@@ -57,20 +57,18 @@ The bot must reliably notify the admin when a desirable tour becomes worth actin
 
 ## Context
 
-v1.0 shipped 2026-05-03. Codebase: ~3,247 LOC Python across `price_monitor/monitor.py`, `price_monitor/storage.py`, `price_monitor/currency.py`, and `tests/`. 58 tests pass. Tech stack: Python 3.11, SQLite (stdlib), requests, beautifulsoup4, Docker.
+v1.0 shipped 2026-05-03. v5.0 shipped 2026-05-04. 89 tests pass.
 
 All concerns from initial planning are resolved:
 - ✓ `MonitorConfig` test construction in sync with fields (Phase 1)
 - ✓ URL allowlisting uses exact-domain `_ALLOWED_HOSTS` frozenset, not substring matching (Phase 2)
 - ✓ JSON persistence replaced with atomic SQLite writes (Phase 1)
 - ✓ Telegram access fails-secure when `TELEGRAM_CHAT_ID` unset (Phase 2)
-- Price history pruning: deferred to v2 (ANLY-02)
-
-Known tech debt (low-severity, v2):
-- SQLite WAL mode not enabled
-- No VACUUM scheduling
-- Legacy `settings_path`/`state_path`/`history_path` fields in `MonitorConfig` kept for compatibility
-- No retry logic for provider fetches or Telegram delivery
+- Price history pruning: implemented (ANLY-02)
+- SQLite WAL mode: enabled (v4.0)
+- VACUUM scheduling: weekly (v4.0)
+- Legacy JSON path fields: removed from MonitorConfig (v4.0)
+- Telegram retry: 3 attempts with backoff (v4.0)
 
 ## Constraints
 

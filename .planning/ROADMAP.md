@@ -55,6 +55,10 @@ Plans:
 
 **Plans**: TBD
 
+**Plans**: 1 plan
+Plans:
+- [x] 03-01-PLAN.md — Docker HEALTHCHECK, backup/restore docs, GitHub Actions CI pipeline.
+
 ---
 
 ## v1.0 Phases (Shipped)
@@ -76,4 +80,4 @@ Plans:
 |-------|-----------|-------|--------|
 | 1. Provider Hardening | v2.0 | 1/1 | Complete |
 | 2. Analytics & Insights | v2.0 | 1/1 | Complete |
-| 3. Operations | v2.0 | 0/TBD | Not started |
+| 3. Operations | v2.0 | 1/1 | Complete |

@@ -115,3 +115,30 @@ comparison, send a concrete hotel/search URL with the needed dates instead of a
 homepage URL.
 
 Without Telegram settings the service only writes to Docker logs.
+
+## Backup and restore
+
+The SQLite database at `BG_DB_PATH` (`/data/price_monitor.sqlite3`) is a self-contained
+file that stores all settings, price history, and currency observations. Back it up
+periodically to avoid data loss.
+
+### Hot backup (container running)
+
+```bash
+docker compose cp bg-price-monitor:/data/price_monitor.sqlite3 ./backup-price_monitor.sqlite3
+```
+
+### Restore
+
+```bash
+docker compose cp ./backup-price_monitor.sqlite3 bg-price-monitor:/data/price_monitor.sqlite3
+docker compose restart bg-price-monitor
+```
+
+### Alternative: backup with docker compose run (container stopped)
+
+```bash
+docker compose run --rm -v $(pwd):/backup bg-price-monitor cp /data/price_monitor.sqlite3 /backup/
+```
+
+The SQLite file is portable — you can open it with any SQLite client for inspection.

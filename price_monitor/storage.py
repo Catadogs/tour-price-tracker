@@ -188,6 +188,7 @@ def _initialize_storage(
 def _connect(db_path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(db_path, timeout=10)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA busy_timeout = 10000")
     return con
@@ -533,6 +534,14 @@ def prune_price_history(db_path: Path, retention_days: int) -> int:
             if deleted:
                 logging.info("Pruned %d price_history rows older than %d days", deleted, retention_days)
             return deleted
+
+
+def vacuum_db(db_path: Path) -> None:
+    """Optimize and compact the database file."""
+    with _WRITE_LOCK:
+        with _connection(db_path) as con:
+            con.execute("PRAGMA optimize")
+            con.execute("VACUUM")
 
 
 def load_price_history_grouped(

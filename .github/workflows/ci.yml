@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r price_monitor/requirements.txt
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker compose build
+      - name: Verify image exists
+        run: docker image inspect bg-price-monitor:latest
+
+  push:
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log into ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push Docker image
+        run: |
+          REPO=ghcr.io/${{ github.repository_owner }}/bg-price-monitor
+          REPO_LOWER=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+          docker compose build
+          docker tag bg-price-monitor:latest ${REPO_LOWER}:latest
+          docker tag bg-price-monitor:latest ${REPO_LOWER}:sha-${GITHUB_SHA::7}
+          docker push ${REPO_LOWER}:latest
+          docker push ${REPO_LOWER}:sha-${GITHUB_SHA::7}
