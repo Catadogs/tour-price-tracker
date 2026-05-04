@@ -1,12 +1,12 @@
 services:
   bg-price-monitor:
     # --- Build from source (default) ---
-    # build:
-    #   context: .
-    #   dockerfile: docker/price-monitor/Dockerfile
-    # image: bg-price-monitor:latest
-    # --- Pull from GitHub Container Registry ---
-    image: ghcr.io/catadogs/bg-price-monitor:latest
+    build:
+      context: .
+      dockerfile: docker/price-monitor/Dockerfile
+    image: bg-price-monitor:latest
+    # --- Or pull from GitHub Container Registry ---
+    # image: ghcr.io/catadogs/bg-price-monitor:latest
     container_name: bg-price-monitor
     restart: unless-stopped
     environment:

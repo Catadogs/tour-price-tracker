@@ -102,7 +102,7 @@ class MonitorConfig:
             ),
             currency_check_hours=int(os.getenv("BG_CURRENCY_CHECK_HOURS", "24")),
             price_history_retention_days=int(os.getenv("BG_PRICE_HISTORY_RETENTION_DAYS", "90")),
-            chart_interval_hours=int(os.getenv("BG_CHART_INTERVAL_HOURS", "168")),
+            chart_interval_hours=int(os.getenv("BG_CHART_INTERVAL_HOURS", "0")),
             anomaly_preset=os.getenv("BG_ANOMALY_PRESET", "balanced"),
         )
 
