@@ -1024,6 +1024,9 @@ class TelegramControlBot:
         elif data == "set_target":
             self.pending[chat_id] = "set_target"
             self.send_message(chat_id, "Отправь целевую цену в RUB, например: 160000\nБот пришлёт алерт когда цена будет ≤ этой суммы.")
+        elif data == "set_retention":
+            self.pending[chat_id] = "set_retention"
+            self.send_message(chat_id, "Отправь срок хранения истории цен в днях (например: 90).")
         elif data == "clear_target":
             settings = load_runtime_settings(self.config)
             settings["target_price_rub"] = None
@@ -1083,6 +1086,13 @@ class TelegramControlBot:
                 settings["target_price_rub"] = target
                 save_runtime_settings(self.config, settings)
                 self.send_message(chat_id, f"Целевая цена установлена: {format_rub(target)}", reply_markup=main_keyboard())
+            elif action == "set_retention":
+                days = int(re.sub(r"\D", "", text))
+                if days < 7:
+                    raise ValueError("минимальный срок хранения — 7 дней")
+                settings["price_history_retention_days"] = days
+                save_runtime_settings(self.config, settings)
+                self.send_message(chat_id, f"Срок хранения истории: {days} дн.", reply_markup=main_keyboard())
         except ValueError as exc:
             self.send_message(chat_id, f"Не удалось сохранить настройку: {exc}", reply_markup=main_keyboard())
         except Exception as exc:
@@ -1183,6 +1193,9 @@ def settings_keyboard() -> dict[str, object]:
             [
                 {"text": "🎯 Целевая цена", "callback_data": "set_target"},
                 {"text": "Сбросить цель", "callback_data": "clear_target"},
+            ],
+            [
+                {"text": "🗑️ Хранение истории", "callback_data": "set_retention"},
             ],
             [{"text": "Проверить сейчас", "callback_data": "check"}],
         ]
@@ -1294,6 +1307,23 @@ def configure_logging() -> None:
     )
 
 
+def _prune_if_needed(
+    config: MonitorConfig,
+    retention_days: int,
+    last_prune: datetime | None,
+    min_interval_hours: int = 24,
+) -> datetime | None:
+    """Prune price history if enough time has passed since last prune."""
+    now = datetime.now()
+    if last_prune and (now - last_prune).total_seconds() < min_interval_hours * 3600:
+        return last_prune
+    try:
+        storage.prune_price_history(config.db_path, retention_days)
+    except Exception:
+        logging.exception("Price history pruning failed")
+    return now
+
+
 def main() -> int:
     configure_logging()
     config = MonitorConfig.from_env()
@@ -1302,6 +1332,8 @@ def main() -> int:
     TelegramControlBot(config, check_lock).start()
 
     last_currency_check: datetime | None = None
+    last_prune: datetime | None = None
+    last_chart_sent: datetime | None = None
 
     while True:
         try:
@@ -1335,6 +1367,8 @@ def main() -> int:
             return 0
 
         active = effective_config(config)
+        last_prune = _prune_if_needed(config, active.price_history_retention_days, last_prune)
+
         sleep_seconds = adaptive_interval(active.departure_from, active.interval_seconds)
         logging.info("Next check in %s", format_interval(sleep_seconds))
         time.sleep(sleep_seconds)
