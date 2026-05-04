@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -518,3 +518,48 @@ def load_currency_observations(
             (pair, limit),
         ).fetchall()
     return [(row["observed_at"], row["rate"]) for row in rows]
+
+
+def prune_price_history(db_path: Path, retention_days: int) -> int:
+    """Delete price_history rows older than retention_days. Returns count of deleted rows."""
+    with _WRITE_LOCK:
+        with _connection(db_path) as con:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat(timespec="seconds")
+            cursor = con.execute(
+                "DELETE FROM price_history WHERE observed_at < ?",
+                (cutoff,),
+            )
+            deleted = cursor.rowcount
+            if deleted:
+                logging.info("Pruned %d price_history rows older than %d days", deleted, retention_days)
+            return deleted
+
+
+def load_price_history_grouped(
+    db_path: Path,
+) -> dict[str, dict[str, dict[int, list[tuple[str, int]]]]]:
+    """Return price history grouped by target_name -> departure_date -> nights -> [(observed_at, price_rub), ...].
+
+    Example: {"Основной поиск": {"14.09.2026": {12: [("2026-05-01T10:00", 280000), ...]}}}
+    """
+    grouped: dict[str, dict[str, dict[int, list[tuple[str, int]]]]] = {}
+    with _connection(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT target_name, departure_date, nights, observed_at, price_rub
+            FROM price_history
+            ORDER BY target_name, departure_date, nights, observed_at
+            """
+        ).fetchall()
+    for row in rows:
+        target = str(row["target_name"])
+        date = str(row["departure_date"])
+        nights = int(row["nights"])
+        ts = str(row["observed_at"])
+        price = int(row["price_rub"])
+        (grouped
+            .setdefault(target, {})
+            .setdefault(date, {})
+            .setdefault(nights, [])
+            .append((ts, price)))
+    return grouped
