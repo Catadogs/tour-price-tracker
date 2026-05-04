@@ -1217,6 +1217,7 @@ def settings_keyboard() -> dict[str, object]:
             [
                 {"text": "🗑️ Хранение истории", "callback_data": "set_retention"},
             ],
+            [{"text": "📊 Тренды", "callback_data": "trend"}],
             [{"text": "Проверить сейчас", "callback_data": "check"}],
         ]
     }
