@@ -32,10 +32,10 @@
 | PROV-01 | Phase 1 | Done |
 | PROV-02 | Phase 1 | Done |
 | PROV-03 | Phase 1 | Done |
-| ANLY-01 | Phase 2 | Pending |
-| ANLY-02 | Phase 2 | Pending |
-| ANLY-03 | Phase 2 | Pending |
-| ANLY-04 | Phase 2 | Pending |
+| ANLY-01 | Phase 2 | Planned (02-01) |
+| ANLY-02 | Phase 2 | Planned (02-01) |
+| ANLY-03 | Phase 2 | Planned (02-01) |
+| ANLY-04 | Phase 2 | Planned (02-01) |
 | OPER-01 | Phase 3 | Pending |
 | OPER-02 | Phase 3 | Pending |
 | OPER-03 | Phase 3 | Pending |

@@ -38,7 +38,9 @@ Plans:
 4. Price history older than configurable retention days is auto-pruned.
 5. matplotlib added to `requirements.txt`.
 
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 02-01-PLAN.md — Trend summaries, retention pruning, anomaly presets, weekly matplotlib chart.
 
 ### Phase 3: Operations
 **Goal**: Docker healthcheck, documented backup/restore, and CI pipeline for tests and image builds.
@@ -73,5 +75,5 @@ Plans:
 | Phase | Milestone | Plans | Status |
 |-------|-----------|-------|--------|
 | 1. Provider Hardening | v2.0 | 1/1 | Complete |
-| 2. Analytics & Insights | v2.0 | 0/TBD | Not started |
+| 2. Analytics & Insights | v2.0 | 1/1 | Planning |
 | 3. Operations | v2.0 | 0/TBD | Not started |
