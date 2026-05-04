@@ -1032,6 +1032,25 @@ class TelegramControlBot:
             settings["target_price_rub"] = None
             save_runtime_settings(self.config, settings)
             self.send_message(chat_id, "Целевая цена сброшена.", reply_markup=main_keyboard())
+        elif data == "anomaly_preset":
+            settings = load_runtime_settings(self.config)
+            current = str(settings.get("anomaly_preset", "balanced"))
+            presets = list(ANOMALY_PRESETS.keys())
+            next_idx = (presets.index(current) + 1) % len(presets)
+            next_preset = presets[next_idx]
+            settings["anomaly_preset"] = next_preset
+            preset_data = ANOMALY_PRESETS[next_preset]
+            settings["strong_diff_rub"] = int(preset_data["strong_diff_rub"])
+            settings["strong_diff_percent"] = float(preset_data["strong_diff_percent"])
+            save_runtime_settings(self.config, settings)
+            labels = {"conservative": "консервативный", "balanced": "сбалансированный", "aggressive": "агрессивный"}
+            self.send_message(
+                chat_id,
+                f"Пресет аномалий: *{labels[next_preset]}*\n"
+                f"  Порог RUB: {int(preset_data['strong_diff_rub']):,}\n"
+                f"  Порог %: {preset_data['strong_diff_percent']}%",
+                reply_markup=main_keyboard(),
+            )
         elif data == "help":
             self.send_menu(chat_id)
 
@@ -1174,6 +1193,7 @@ def main_keyboard() -> dict[str, object]:
 def settings_keyboard() -> dict[str, object]:
     return {
         "inline_keyboard": [
+            [{"text": "⚠️ Пресет аномалий", "callback_data": "anomaly_preset"}],
             [
                 {"text": "Добавить фильтр", "callback_data": "add_filter"},
                 {"text": "Очистить фильтры", "callback_data": "clear_filters"},
@@ -1212,6 +1232,8 @@ def format_settings(config: MonitorConfig) -> str:
         days_str = f"{days_left} дн."
     except ValueError:
         days_str = "?"
+    labels = {"conservative": "консервативный", "balanced": "сбалансированный", "aggressive": "агрессивный"}
+    preset_label = labels.get(config.anomaly_preset, "сбалансированный")
     return (
         "Текущие настройки:\n"
         f"Вылет: {config.departure_from}-{config.departure_to} (через {days_str})\n"
@@ -1220,6 +1242,8 @@ def format_settings(config: MonitorConfig) -> str:
         "Разница 12/13 ночей: "
         f"показать, если >= {config.strong_diff_rub} RUB "
         f"или >= {config.strong_diff_percent}%\n"
+        f"Пресет аномалий: {preset_label}\n"
+        f"Хранение истории: {config.price_history_retention_days} дн.\n"
         f"Частота проверки: {format_interval(config.interval_seconds)}\n"
         f"Целевая цена: {target_str}\n"
         f"Поиски:\n{search_lines}"
