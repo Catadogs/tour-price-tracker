@@ -1205,6 +1205,9 @@ class TelegramControlBot:
         elif data == "trend":
             report = format_trend_report(self.config.db_path, effective_config(self.config))
             self.send_message(chat_id, report, reply_markup=main_keyboard())
+        elif data == "weekly":
+            report = format_weekly_change(self.config.db_path, effective_config(self.config))
+            self.send_message(chat_id, report, reply_markup=main_keyboard())
         elif data == "recommend":
             active = effective_config(self.config)
             rec = _generate_recommendation_from_db(active)
@@ -1409,7 +1412,7 @@ def main_keyboard() -> dict[str, object]:
         "inline_keyboard": [
             [{"text": "Проверить сейчас", "callback_data": "check"}],
             [
-                {"text": "📊 Тренды", "callback_data": "trend"},
+                {"text": "📊 Тренды", "callback_data": "trend"}, {"text": "📅 Неделя", "callback_data": "weekly"},
                 {"text": "🤖 Совет", "callback_data": "recommend"},
             ],
             [{"text": "Настройки", "callback_data": "settings"}],
@@ -1466,7 +1469,7 @@ def settings_keyboard() -> dict[str, object]:
                 {"text": "💵 Ориентир цены", "callback_data": "set_reference"},
             ],
             [
-                {"text": "📊 Тренды", "callback_data": "trend"},
+                {"text": "📊 Тренды", "callback_data": "trend"}, {"text": "📅 Неделя", "callback_data": "weekly"},
                 {"text": "🤖 Совет", "callback_data": "recommend"},
             ],
             [{"text": "Проверить сейчас", "callback_data": "check"}],
@@ -1710,6 +1713,81 @@ def _generate_recommendation_from_db(config: MonitorConfig) -> str:
         lines.append(f"  {verdict}\n")
 
     lines.append("_На основе истории цен и курса. Не совет._")
+    return "\n".join(lines)
+
+
+def format_weekly_change(
+    db_path: Path,
+    config: MonitorConfig | None = None,
+) -> str:
+    """Compare current prices with 7 days ago, return compact summary."""
+    grouped = storage.load_price_history_grouped(db_path)
+    if not grouped:
+        return "📅 *За неделю*\n\nНет данных для сравнения."
+
+    now = datetime.now()
+    week_ago = now - (now - now.replace(hour=0, minute=0, second=0, microsecond=0)).__class__(days=7)
+
+    lines: list[str] = ["📅 *За неделю*"]
+    lines.append(f"{week_ago.strftime('%d.%m')} → {now.strftime('%d.%m')}\n")
+
+    shown = 0
+    for target_name, by_date in grouped.items():
+        # Filter by config date range if provided
+        if config:
+            from datetime import timedelta
+            try:
+                start = parse_ru_date(config.departure_from)
+                end = parse_ru_date(config.departure_to)
+                d = start
+                allowed = set()
+                while d <= end:
+                    allowed.add(d.strftime("%d.%m.%Y"))
+                    d += timedelta(days=1)
+            except ValueError:
+                allowed = None
+        else:
+            allowed = None
+
+        for date, by_nights in by_date.items():
+            if allowed is not None and date not in allowed:
+                continue
+            for nights, points in by_nights.items():
+                if len(points) < 2:
+                    continue
+                # Find price closest to 7 days ago
+                prices_with_dates = [
+                    (datetime.fromisoformat(p[0]), p[1])
+                    for p in points
+                ]
+                prices_with_dates.sort()
+                old_price = None
+                for dt, price in prices_with_dates:
+                    if dt <= week_ago:
+                        old_price = price
+                    else:
+                        break
+                if old_price is None:
+                    continue
+                current_price = prices_with_dates[-1][1]
+                if old_price == current_price:
+                    continue
+                delta = current_price - old_price
+                pct = delta / old_price * 100
+                if abs(pct) < 0.5:
+                    continue
+                arrow = "📉" if delta < 0 else "📈"
+                sign = "" if delta < 0 else "+"
+                lines.append(
+                    f"  {arrow} {date}, {nights}н: "
+                    f"{format_rub(old_price)} → *{format_rub(current_price)}* "
+                    f"({sign}{delta:+,.0f} RUB, {sign}{pct:.1f}%)".replace(",", " ")
+                )
+                shown += 1
+
+    if shown == 0:
+        lines.append("  Цены не изменились за неделю.")
+
     return "\n".join(lines)
 
 

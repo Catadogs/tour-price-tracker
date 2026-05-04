@@ -493,7 +493,7 @@ def test_main_keyboard_structure():
         "check", "settings", "add_search", "clear_searches",
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
-        "trend", "recommend",
+        "trend", "weekly", "recommend",
     }
     assert callback_data_values == expected
 
@@ -515,7 +515,7 @@ def test_settings_keyboard_structure():
         "check", "add_search", "clear_searches",
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
-        "set_retention", "anomaly_preset", "trend", "recommend", "set_reference",
+        "set_retention", "anomaly_preset", "trend", "weekly", "recommend", "set_reference",
     }
     assert callback_data_values == expected
 
