@@ -1304,38 +1304,14 @@ class TelegramControlBot:
                 if any(isinstance(item, dict) and item.get("url") == url for item in searches):
                     self.send_message(chat_id, "Эта ссылка уже отслеживается.", reply_markup=main_keyboard())
                     return
-                provider = provider_from_url(url)
-                name = f"{provider} {len(searches) + 1}"
+                name = f"{provider_from_url(url)} {len(searches) + 1}"
                 searches.append({"name": name, "url": url, "room_filters": []})
                 settings["searches"] = searches
                 save_runtime_settings(self.config, settings)
 
-                # Auto-add Level.Travel and Travelata searches for the same hotel
-                added_extra = []
+                msg = f"Добавлен {name}. Нажми Проверить сейчас."
                 if is_bgoperator_url(url):
-                    active = effective_config(self.config)
-                    try:
-                        html = fetch_html(url)
-                        hotel = extract_hotel_name(html, url)
-                        if hotel:
-                            # Generate search URLs for competitors
-                            lt_url = _build_leveltravel_url(hotel, active.departure_from)
-                            if lt_url and not any(isinstance(s, dict) and s.get("url") == lt_url for s in searches):
-                                searches.append({"name": f"Level.Travel {len(searches) + 1}", "url": lt_url, "room_filters": []})
-                                added_extra.append("Level.Travel")
-                            tt_url = _build_travelata_url(hotel, active.departure_from)
-                            if tt_url and not any(isinstance(s, dict) and s.get("url") == tt_url for s in searches):
-                                searches.append({"name": f"Travelata {len(searches) + 1}", "url": tt_url, "room_filters": []})
-                                added_extra.append("Travelata")
-                        settings["searches"] = searches
-                        save_runtime_settings(self.config, settings)
-                    except Exception:
-                        pass  # Auto-search failed, BG search is still added
-
-                msg = f"Добавлен {name}."
-                if added_extra:
-                    msg += f"\nАвтоматически добавлены: {', '.join(added_extra)}."
-                msg += " Нажми Проверить сейчас."
+                    msg += "\n💡 Для сравнения цен добавь этот же отель на Level.Travel и Travelata."
                 self.send_message(chat_id, msg, reply_markup=main_keyboard())
             elif action == "set_dates":
                 start, end = parse_date_range_text(text)
@@ -1533,27 +1509,6 @@ def format_settings(config: MonitorConfig) -> str:
 def _normalize_hotel_name(name: str) -> str:
     """Lowercase and strip special chars for fuzzy matching."""
     return re.sub(r"[^\w\s]", "", name.lower()).strip()
-
-
-def _build_leveltravel_url(hotel_name: str, date_from: str) -> str | None:
-    """Build a Level.Travel search URL for the given hotel and date."""
-    try:
-        dt = parse_ru_date(date_from)
-        # Level.Travel uses date_from in their search params
-        from_str = dt.strftime("%d.%m.%Y")
-        to_date = dt + (dt.replace(day=1) - dt.replace(day=1)).__class__(days=10)
-        to_str = to_date.strftime("%d.%m.%Y")
-        return f"https://level.travel/hotels?q={requests.utils.requote_uri(hotel_name)}"
-    except Exception:
-        return None
-
-
-def _build_travelata_url(hotel_name: str, date_from: str) -> str | None:
-    """Build a Travelata search URL for the given hotel."""
-    try:
-        return f"https://travelata.ru/search/?q={requests.utils.requote_uri(hotel_name)}"
-    except Exception:
-        return None
 
 
 def match_hotels_across_providers(results: list[TargetResult]) -> list[HotelGroup]:
