@@ -514,6 +514,7 @@ def test_main_keyboard_structure():
         "check", "settings", "add_search", "clear_searches",
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
+        "trend",
     }
     assert callback_data_values == expected
 
@@ -535,6 +536,7 @@ def test_settings_keyboard_structure():
         "check", "add_search", "clear_searches",
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
+        "set_retention", "anomaly_preset", "trend",
     }
     assert callback_data_values == expected
 
@@ -897,6 +899,7 @@ def test_anomaly_preset_applied_in_effective_config():
         strong_diff_rub=20000,
         strong_diff_percent=7.0,
     )
+    initialize_storage(config)
     save_runtime_settings(config, {"anomaly_preset": "aggressive"})
     effective = effective_config(config)
     assert effective.anomaly_preset == "aggressive"
@@ -906,6 +909,7 @@ def test_anomaly_preset_applied_in_effective_config():
 
 def test_anomaly_preset_ignores_invalid_name():
     config = _make_bot_config(anomaly_preset="balanced")
+    initialize_storage(config)
     save_runtime_settings(config, {"anomaly_preset": "nonexistent"})
     effective = effective_config(config)
     assert effective.strong_diff_rub == 20000
@@ -975,6 +979,7 @@ def test_prune_price_history_removes_old_rows(tmp_path: Path):
 def test_retention_setting_in_effective_config():
     """Retention days from runtime settings override env default."""
     config = _make_bot_config(price_history_retention_days=90)
+    initialize_storage(config)
     save_runtime_settings(config, {"price_history_retention_days": 30})
     effective = effective_config(config)
     assert effective.price_history_retention_days == 30
