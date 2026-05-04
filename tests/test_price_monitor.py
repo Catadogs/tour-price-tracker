@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 
 from price_monitor.monitor import (
+    ANOMALY_PRESETS,
     MonitorConfig,
     TelegramControlBot,
     adaptive_interval,
@@ -20,6 +21,7 @@ from price_monitor.monitor import (
     format_report,
     format_strong_diff_line,
     format_target_alerts,
+    format_trend_report,
     format_interval,
     format_settings,
     load_price_history,
@@ -99,6 +101,9 @@ def test_filter_and_best_offer_by_departure_and_nights():
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
+        price_history_retention_days=90,
+        chart_interval_hours=168,
+        anomaly_preset="balanced",
     )
 
     best = best_by_departure_and_nights(filter_offers(parse_offers(html), config))
@@ -135,6 +140,9 @@ def test_strong_diff_line_flags_large_12_13_gap():
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
+        price_history_retention_days=90,
+        chart_interval_hours=168,
+        anomaly_preset="balanced",
     )
     best = best_by_departure_and_nights(filter_offers(parse_offers(html), config))
 
@@ -235,6 +243,9 @@ def test_monitor_storage_wrappers_use_sqlite(tmp_path: Path):
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
+        price_history_retention_days=90,
+        chart_interval_hours=168,
+        anomaly_preset="balanced",
     )
 
     initialize_storage(config)
@@ -292,6 +303,9 @@ def test_run_check_persists_snapshot_and_history_in_sqlite(tmp_path: Path, monke
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
+        price_history_retention_days=90,
+        chart_interval_hours=168,
+        anomaly_preset="balanced",
     )
     monkeypatch.setattr("price_monitor.monitor.fetch_html", lambda url: html)
 
@@ -335,6 +349,9 @@ def test_effective_config_ignores_invalid_runtime_settings(
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
+        price_history_retention_days=90,
+        chart_interval_hours=168,
+        anomaly_preset="balanced",
     )
     initialize_storage(config)
     save_runtime_settings(
@@ -383,6 +400,9 @@ def test_load_search_targets_skips_malformed_entries(tmp_path: Path):
         currency_source_url="https://example.test/rates",
         currency_alert_threshold_pct=1.0,
         currency_check_hours=24,
+        price_history_retention_days=90,
+        chart_interval_hours=168,
+        anomaly_preset="balanced",
     )
     initialize_storage(config)
     save_runtime_settings(
@@ -451,6 +471,9 @@ def _make_bot_config(**kwargs):
         "currency_source_url": "https://example.test/rates",
         "currency_alert_threshold_pct": 1.0,
         "currency_check_hours": 24,
+        "price_history_retention_days": 90,
+        "chart_interval_hours": 168,
+        "anomaly_preset": "balanced",
     }
     defaults.update(kwargs)
     return MonitorConfig(**defaults)
@@ -865,3 +888,113 @@ def test_format_report_includes_anomaly_section():
 
     assert "Аномалии длительности" in report
     assert "13н дешевле 12н" in report
+
+
+def test_anomaly_preset_applied_in_effective_config():
+    """Verify anomaly preset overrides strong_diff_rub and strong_diff_percent."""
+    config = _make_bot_config(
+        anomaly_preset="conservative",
+        strong_diff_rub=20000,
+        strong_diff_percent=7.0,
+    )
+    save_runtime_settings(config, {"anomaly_preset": "aggressive"})
+    effective = effective_config(config)
+    assert effective.anomaly_preset == "aggressive"
+    assert effective.strong_diff_rub == 10000
+    assert effective.strong_diff_percent == 4.0
+
+
+def test_anomaly_preset_ignores_invalid_name():
+    config = _make_bot_config(anomaly_preset="balanced")
+    save_runtime_settings(config, {"anomaly_preset": "nonexistent"})
+    effective = effective_config(config)
+    assert effective.strong_diff_rub == 20000
+    assert effective.strong_diff_percent == 7.0
+
+
+def test_format_trend_report_no_data(tmp_path: Path):
+    """Trend report returns placeholder when no history exists."""
+    from price_monitor import storage
+    db_path = tmp_path / "test_trend_empty.sqlite3"
+    storage.initialize_storage(db_path)
+    report = format_trend_report(db_path)
+    assert "Нет данных" in report
+
+
+def test_format_trend_report_with_data(tmp_path: Path):
+    """Trend report includes price direction for each group."""
+    from price_monitor import storage
+    db_path = tmp_path / "test_trend_data.sqlite3"
+    storage.initialize_storage(db_path)
+    snap = {
+        "Основной поиск|14.09.2026|12|Room": {
+            "departure_date": "14.09.2026",
+            "nights": 12,
+            "price_rub": 280000,
+        }
+    }
+    storage.append_price_history(db_path, snap, "2026-05-01T10:00")
+    snap2 = {
+        "Основной поиск|14.09.2026|12|Room": {
+            "departure_date": "14.09.2026",
+            "nights": 12,
+            "price_rub": 260000,
+        }
+    }
+    storage.append_price_history(db_path, snap2, "2026-05-03T10:00")
+    report = format_trend_report(db_path)
+    assert "↓" in report
+    assert "260 000" in report
+
+
+def test_prune_price_history_removes_old_rows(tmp_path: Path):
+    """Prune deletes rows older than retention_days."""
+    from datetime import datetime, timedelta, timezone
+    from price_monitor import storage
+    db_path = tmp_path / "test_prune.sqlite3"
+    storage.initialize_storage(db_path)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=100)).isoformat(timespec="seconds")
+    recent_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    snap = {"test|1": {"departure_date": "01.01.2026", "nights": 12, "price_rub": 1000}}
+    # Direct SQL insert for old row
+    with storage._connection(db_path) as con:
+        con.execute(
+            "INSERT INTO price_history(snapshot_key, target_name, provider, departure_date, nights, price_rub, observed_at, payload_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("test|1", "test", "test", "01.01.2026", 12, 1000, old_ts, "{}"),
+        )
+    storage.append_price_history(db_path, snap, recent_ts)
+    deleted = storage.prune_price_history(db_path, retention_days=90)
+    assert deleted >= 1
+    remaining = storage.load_price_history(db_path)
+    for entries in remaining.values():
+        for entry in entries:
+            assert entry[0] == recent_ts
+
+
+def test_retention_setting_in_effective_config():
+    """Retention days from runtime settings override env default."""
+    config = _make_bot_config(price_history_retention_days=90)
+    save_runtime_settings(config, {"price_history_retention_days": 30})
+    effective = effective_config(config)
+    assert effective.price_history_retention_days == 30
+
+
+def test_anomaly_presets_valid():
+    """Verify all three presets have valid thresholds."""
+    assert set(ANOMALY_PRESETS.keys()) == {"conservative", "balanced", "aggressive"}
+    for preset in ANOMALY_PRESETS.values():
+        assert preset["strong_diff_rub"] > 0
+        assert preset["strong_diff_percent"] > 0
+
+
+def test_format_trend_report_direction_stable(tmp_path: Path):
+    """Stable prices show стабильно."""
+    from price_monitor import storage
+    db_path = tmp_path / "test_trend_stable.sqlite3"
+    storage.initialize_storage(db_path)
+    snap = {"t|d|12|r": {"departure_date": "d", "nights": 12, "price_rub": 100000}}
+    storage.append_price_history(db_path, snap, "2026-05-01T10:00")
+    storage.append_price_history(db_path, snap, "2026-05-03T10:00")
+    report = format_trend_report(db_path)
+    assert "стабильно" in report
