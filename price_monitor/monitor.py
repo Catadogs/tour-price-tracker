@@ -474,6 +474,36 @@ def format_strong_diff_line(
     ).replace(",", " ")
 
 
+def format_trend_report(db_path: Path) -> str:
+    """Format compact trend summary from price history."""
+    grouped = storage.load_price_history_grouped(db_path)
+    if not grouped:
+        return "📊 *Тренды цен*\n\nНет данных для анализа. Нужно несколько проверок."
+
+    lines: list[str] = ["📊 *Тренды цен*\n"]
+    for target_name, by_date in grouped.items():
+        lines.append(f"🏨 *{target_name}*")
+        for date, by_nights in by_date.items():
+            for nights, price_points in by_nights.items():
+                if len(price_points) < 2:
+                    continue
+                prices = [p[1] for p in price_points[-6:]]
+                delta = prices[-1] - prices[0]
+                pct = abs(delta) / prices[0] * 100 if prices[0] else 0
+                if pct < 1:
+                    direction = "→ стабильно"
+                elif delta < 0:
+                    direction = f"↓ {pct:.1f}%"
+                else:
+                    direction = f"↑ +{pct:.1f}%"
+                current = prices[-1]
+                lines.append(
+                    f"  {date}, {nights}н: *{format_rub(current)}* {direction}"
+                )
+        lines.append("")
+    return "\n".join(lines)
+
+
 def snapshot(
     best: dict[str, dict[int, Offer]],
     target_name: str = "Main search",
@@ -921,6 +951,9 @@ class TelegramControlBot:
             self.run_manual_check(chat_id)
         elif text.startswith("/status"):
             self.send_message(chat_id, format_settings(effective_config(self.config)), reply_markup=main_keyboard())
+        elif text.startswith("/trend"):
+            report = format_trend_report(self.config.db_path)
+            self.send_message(chat_id, report, reply_markup=main_keyboard())
         else:
             self.send_message(chat_id, "Используй кнопки или команду /help.", reply_markup=main_keyboard())
 
@@ -943,6 +976,9 @@ class TelegramControlBot:
 
         if data == "check":
             self.run_manual_check(chat_id)
+        elif data == "trend":
+            report = format_trend_report(self.config.db_path)
+            self.send_message(chat_id, report, reply_markup=main_keyboard())
         elif data == "settings":
             self.send_message(chat_id, format_settings(effective_config(self.config)), reply_markup=settings_keyboard())
         elif data == "add_filter":
@@ -1099,6 +1135,7 @@ def main_keyboard() -> dict[str, object]:
     return {
         "inline_keyboard": [
             [{"text": "Проверить сейчас", "callback_data": "check"}],
+            [{"text": "📊 Тренды", "callback_data": "trend"}],
             [{"text": "Настройки", "callback_data": "settings"}],
             [
                 {"text": "Добавить отель/поиск", "callback_data": "add_search"},
