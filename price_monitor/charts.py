@@ -70,7 +70,7 @@ def _chart_for_target(
         return None
 
     # Limit chart to most recent 30 days of data
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    cutoff = datetime.now() - timedelta(days=30)
 
     safe_name = "".join(c if c.isalnum() or c in "_- " else "_" for c in target_name)
     output_path = output_dir / f"chart_{safe_name}.png"
@@ -128,10 +128,10 @@ def prune_old_charts(output_dir: Path, max_age_days: int = 30) -> None:
     """Delete chart PNGs older than max_age_days."""
     if not output_dir.exists():
         return
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    cutoff = datetime.now() - timedelta(days=max_age_days)
     for png in output_dir.glob("*.png"):
         try:
-            if datetime.fromtimestamp(png.stat().st_mtime, tz=timezone.utc) < cutoff:
+            if datetime.fromtimestamp(png.stat().st_mtime) < cutoff:
                 png.unlink()
         except OSError:
             pass
