@@ -18,7 +18,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from price_monitor import currency, storage
-from price_monitor import sletat
+# from price_monitor import sletat  # disabled: need hotel ID mapping
 
 
 DEFAULT_URL = (
@@ -1087,24 +1087,12 @@ def run_check(config: MonitorConfig) -> str:
     if cross:
         report = f"{report}\n\n{cross}"
 
-    # Sletat.ru multi-operator comparison
-    try:
-        # Convert dates from dd.mm.yyyy to yyyy-mm-dd for Sletat API
-        sl_from = parse_ru_date(active_config.departure_from).strftime("%Y-%m-%d")
-        sl_to = parse_ru_date(active_config.departure_to).strftime("%Y-%m-%d")
-        sl_data = sletat.fetch_min_prices(
-            sl_from,
-            sl_to,
-            nights_min=min(active_config.nights),
-            nights_max=max(active_config.nights),
-        )
-        sl_text = sletat.format_sletat_comparison(
-            sl_data, sl_from, sl_to
-        )
-        if sl_text:
-            report = f"{report}\n\n{sl_text}"
-    except Exception:
-        logging.debug("Sletat comparison skipped")
+    # Sletat.ru multi-operator comparison (disabled: need per-hotel IDs)
+    # try:
+    #     sl_from = parse_ru_date(active_config.departure_from).strftime("%Y-%m-%d")
+    #     sl_to = parse_ru_date(active_config.departure_to).strftime("%Y-%m-%d")
+    #     sl_data = sletat.fetch_min_prices(sl_from, sl_to, ...)
+    #     ...
 
     alerts: list[str] = []
     if minimums:
