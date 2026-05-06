@@ -59,6 +59,7 @@ Progress: [██████████] 100%
 | v3.0 Competition & Discovery | 3 | 3 | 87 | Shipped |
 | v4.0 Tech Debt Cleanup | 1 | 1 | 87 | Shipped |
 | v5.0 Recommendation & Polish | 2 | 2 | 89 | Shipped |
+| v5.1 Weekly Summary | 1 | 1 | 89 | Shipped |
 
 ### Key decisions
 - Single-user/admin-only; SQLite; one container; Telegram-only UI

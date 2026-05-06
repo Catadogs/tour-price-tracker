@@ -499,11 +499,12 @@ def _utc_now() -> str:
 
 
 def save_currency_observation(db_path: Path, pair: str, rate: float, observed_at: str) -> None:
-    with _connection(db_path) as con:
-        con.execute(
-            "INSERT INTO currency_observations(pair, rate, observed_at) VALUES (?, ?, ?)",
-            (pair, rate, observed_at),
-        )
+    with _WRITE_LOCK:
+        with _connection(db_path) as con:
+            con.execute(
+                "INSERT INTO currency_observations(pair, rate, observed_at) VALUES (?, ?, ?)",
+                (pair, rate, observed_at),
+            )
 
 
 def load_currency_observations(

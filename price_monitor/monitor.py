@@ -1606,6 +1606,9 @@ def format_cross_search_comparison(
         else:
             lines.append(f"  • *{hotel}*: нет предложений")
 
+    return "\n".join(lines)
+
+
 def _generate_recommendation_from_db(config: MonitorConfig) -> str:
     """Generate buy/wait recommendation from DB snapshot + history + currency."""
     snapshot = load_snapshot(config)
