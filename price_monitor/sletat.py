@@ -6,6 +6,7 @@ No auth required, pure JSON, rate-limited at 1 req/sec.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -13,14 +14,13 @@ import requests
 API = "https://api.sletat.ru"
 PRICES_ENDPOINT = f"{API}/history/tour/prices/min"
 
-# Internal Sletat IDs
 COUNTRY_EGYPT = 40
 CITY_MOSCOW = 832
 STAR_5 = 404
 
 
 def fetch_min_prices(
-    date_from: str,       # "2026-09-14"
+    date_from: str,
     date_to: str,
     nights_min: int = 12,
     nights_max: int = 14,
@@ -29,22 +29,7 @@ def fetch_min_prices(
     departure_city_id: int = CITY_MOSCOW,
     star_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Fetch minimum tour prices per day from all operators on Sletat.
-
-    Returns:
-        {
-          "minPrice": 68145,
-          "maxPrice": 159894,
-          "data": [
-            [  # bucket
-              {"price": 71809, "date": "2026-08-24", "sourceId": 20, "sourceName": "ICS Travel Group"},
-              ...
-            ],
-            ...
-          ]
-        }
-        or {"error": "message"} on failure.
-    """
+    """Fetch minimum tour prices per day from all operators on Sletat."""
     try:
         body: dict[str, Any] = {
             "checkInDateFrom": date_from,
@@ -90,11 +75,12 @@ def fetch_min_prices(
         return {"error": str(exc)}
 
 
-def format_sletat_comparison(api_result: dict[str, Any], date_from: str, date_to: str) -> str | None:
-    """Format Sletat price comparison for Telegram.
-
-    date_from/to are ISO format: "2026-09-14"
-    """
+def format_sletat_comparison(
+    api_result: dict[str, Any],
+    date_from: str,
+    date_to: str,
+) -> str | None:
+    """Format Sletat price comparison for Telegram (ISO dates)."""
     if "error" in api_result:
         return None
 
@@ -105,11 +91,9 @@ def format_sletat_comparison(api_result: dict[str, Any], date_from: str, date_to
     if not data:
         return None
 
-    lines = ["🌐 *Sletat\\.ru — все операторы*"]
+    lines = ["Sletat.ru (все 5* отели, не только отслеживаемые)"]
 
-    # Find prices for the user's specific dates
     target_dates = set()
-    from datetime import datetime, timedelta
     try:
         d = datetime.strptime(date_from, "%Y-%m-%d")
         end = datetime.strptime(date_to, "%Y-%m-%d")
@@ -126,27 +110,22 @@ def format_sletat_comparison(api_result: dict[str, Any], date_from: str, date_to
                 found.append(item)
 
     if found:
-        lines.append(f"\nМин. цена на твои даты:")
         for item in sorted(found, key=lambda x: x["date"]):
+            price_str = f"{item['price']:,}".replace(",", " ")
             lines.append(
-                f"  • {item['date']}: *{item['price']:,}* RUB "
-                f"({item.get('sourceName', '?')})".replace(",", " ")
+                f"  {item['date']}: {price_str} RUB ({item.get('sourceName', '?')})"
             )
     else:
-        lines.append(f"\nНа {date_from} — {date_to} данные не найдены\\.")
-        # Show nearest dates with prices
         all_prices = [(item["date"], item["price"], item.get("sourceName", "?"))
                        for bucket in data for item in bucket if item.get("price")]
         if all_prices:
-            lines.append("Ближайшие:")
             for date_str, price, source in all_prices[:5]:
-                lines.append(
-                    f"  • {date_str}: *{price:,}* RUB ({source})".replace(",", " ")
-                )
+                price_str = f"{price:,}".replace(",", " ")
+                lines.append(f"  {date_str}: {price_str} RUB ({source})")
 
     if min_price and max_price:
-        lines.append(
-            f"\nДиапазон за месяц: *{min_price:,}* — *{max_price:,}* RUB".replace(",", " ")
-        )
+        min_str = f"{min_price:,}".replace(",", " ")
+        max_str = f"{max_price:,}".replace(",", " ")
+        lines.append(f"min: {min_str} — max: {max_str} RUB")
 
     return "\n".join(lines)
