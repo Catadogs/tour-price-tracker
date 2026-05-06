@@ -18,6 +18,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from price_monitor import currency, storage
+from price_monitor import sletat
 
 
 DEFAULT_URL = (
@@ -1085,6 +1086,22 @@ def run_check(config: MonitorConfig) -> str:
     cross = format_cross_search_comparison(target_results)
     if cross:
         report = f"{report}\n\n{cross}"
+
+    # Sletat.ru multi-operator comparison
+    try:
+        sl_data = sletat.fetch_min_prices(
+            active_config.departure_from,
+            active_config.departure_to,
+            nights_min=min(active_config.nights),
+            nights_max=max(active_config.nights),
+        )
+        sl_text = sletat.format_sletat_comparison(
+            sl_data, active_config.departure_from, active_config.departure_to
+        )
+        if sl_text:
+            report = f"{report}\n\n{sl_text}"
+    except Exception:
+        logging.debug("Sletat comparison skipped")
 
     alerts: list[str] = []
     if minimums:
