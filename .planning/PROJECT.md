@@ -4,7 +4,7 @@
 
 Personal Tour Price Tracker Bot is a single-user Telegram bot for monitoring vacation tour prices, spotting price anomalies, and warning about currency-driven price hikes before operators recalculate RUB prices. The project is a personal admin-only tool, not a multi-user SaaS product.
 
-v1.0 shipped: the existing Dockerized Python price monitor is now a durable, admin-controlled personal bot with SQLite storage, hardened Telegram authorization, readable price summaries, duration anomaly detection, and daily currency early-warning alerts.
+All six milestones shipped (v1.0 — v5.1): the bot provides durable SQLite storage, hardened Telegram authorization, readable price summaries, duration anomaly detection, daily currency early-warning alerts, cross-provider comparison, AI-powered recommendation engine, and weekly summary reports. 89 tests pass.
 
 ## Core Value
 
@@ -12,7 +12,7 @@ The bot must reliably notify the admin when a desirable tour becomes worth actin
 
 ## Requirements
 
-### Validated
+### Shipped (v1.0 — v5.1)
 
 - ✓ Dockerized Python monitor exists and runs as a long-lived service via `docker/price-monitor/Dockerfile` and `docker-compose.yml`.
 - ✓ Telegram Bot API integration exists for sending messages and handling inline controls in `price_monitor/monitor.py`.
@@ -22,28 +22,29 @@ The bot must reliably notify the admin when a desirable tour becomes worth actin
 - ✓ Scheduled and manual checks exist through `main()`, `run_check()`, and Telegram `/check` handling.
 - ✓ Target price alerts, price history, best-offer selection, and night-duration comparison logic exist in `price_monitor/monitor.py`.
 - ✓ Docker volume persistence exists for runtime state under `/data`.
-- ✓ Replace JSON-backed settings, snapshots, and price history with local SQLite while keeping the app monolithic. — v1.0 (Phase 1: `storage.py` facade, threading.RLock, idempotent schema init)
-- ✓ Keep deployment simple: one Docker image, one application process, one mounted volume for the SQLite database. — v1.0 (Phase 1: `BG_DB_PATH` env var, single `bg-price-monitor` service)
-- ✓ Harden single-user Telegram authorization so only the configured admin can change settings or trigger checks. — v1.0 (Phase 2: fail-secure `is_authorized`, exact-domain `_ALLOWED_HOSTS` frozenset)
-- ✓ Improve Telegram inline menu for managing watched hotels, filters, departure dates, nights, target price, and check frequency. — v1.0 (Phase 2: SQLite-backed settings mutations through `apply_pending_action`)
-- ✓ Send readable Telegram summaries with current best price, date and duration breakdown, and anomaly highlights. — v1.0 (Phase 3: `format_report`, `format_changes`, `format_new_minimums`)
-- ✓ Trigger immediate Telegram alerts when the parsed minimum price is less than or equal to the configured target price. — v1.0 (Phase 3: `format_target_alerts`, 58 tests passing)
-- ✓ Detect duration anomalies for the same departure date, including cases where more nights are cheaper or meaningfully better value. — v1.0 (Phase 4: `format_duration_anomalies` replacing hardcoded `format_strong_diff_line`)
-- ✓ Monitor USD/RUB and EUR/RUB exchange rates daily and send preemptive warnings when a significant intraday jump may cause next-day tour price increases. — v1.0 (Phase 5: `price_monitor/currency.py`, CBR integration, `currency_observations` SQLite table)
-- ✓ Preserve and expand test coverage around parsers, Telegram formatting, SQLite persistence, anomaly detection, and currency alerts. — v1.0 (58 tests across all subsystems)
-
-### Active (v2.0)
-
-- [ ] PROV-01: Add stored real-world HTML fixtures for Biblio-Globus, Level.Travel, and Travelata
-- [ ] PROV-02: Split provider-specific parsing into focused modules
-- [ ] PROV-03: Add per-provider rate limits and retry budgets
-- [ ] ANLY-01: Add compact trend summaries in Telegram
-- [ ] ANLY-02: Add retention settings for historical prices
-- [ ] ANLY-03: Add configurable anomaly presets (conservative/balanced/aggressive)
-- [ ] ANLY-04: Weekly price change chart (PNG via matplotlib) sent to Telegram
-- [ ] OPER-01: Docker healthcheck
-- [ ] OPER-02: Document backup and restore commands for SQLite volume
-- [ ] OPER-03: CI pipeline for tests and Docker image builds
+- ✓ SQLite storage with threading.RLock, idempotent schema init, WAL mode, periodic VACUUM — v1.0 + v4.0
+- ✓ Single Docker image, one application process, one mounted volume for the SQLite database — v1.0
+- ✓ Fail-secure Telegram authorization with exact-domain `_ALLOWED_HOSTS` frozenset — v1.0/v2.0
+- ✓ SQLite-backed settings mutations through `apply_pending_action` — v1.0/v2.0
+- ✓ Readable Telegram summaries with best price, date/duration breakdown, anomaly highlights — v1.0
+- ✓ Target price alerts when parsed minimum falls below configured target — v1.0
+- ✓ Generalized pairwise duration anomaly detection — v1.0
+- ✓ CBR currency monitoring (USD/RUB, EUR/RUB) with preemptive Telegram warnings — v1.0
+- ✓ Real HTML fixtures for Biblio-Globus, Level.Travel, Travelata — v2.0
+- ✓ Modular parsers in `price_monitor/parsers/` — v2.0
+- ✓ Per-provider rate limits and retry budgets — v2.0
+- ✓ Trend summaries, retention pruning, anomaly presets — v2.0
+- ✓ Weekly price charts (matplotlib → Telegram) — v2.0
+- ✓ Docker healthcheck — v2.0
+- ✓ Backup/restore documentation — v2.0
+- ✓ CI pipeline (tests + Docker build) — v2.0
+- ✓ Cross-provider comparison with fuzzy hotel matching — v3.0
+- ✓ New arrivals detection (departure dates, hotel/room combos) — v3.0
+- ✓ GHCR Docker image publishing — v3.0
+- ✓ SQLite WAL mode, periodic VACUUM, Telegram retry with backoff — v4.0
+- ✓ AI recommendation engine (buy/wait/hold verdicts) — v5.0
+- ✓ Report polish, auto-competitor search, cross-hotel comparison — v5.0
+- ✓ Weekly summary reports — v5.1
 
 ### Out of Scope
 
@@ -51,24 +52,23 @@ The bot must reliably notify the admin when a desirable tour becomes worth actin
 - External message brokers such as RabbitMQ, Redis, Kafka, or Celery — background checks must run in the same process.
 - Heavy databases such as PostgreSQL or MySQL — SQLite is the required storage layer.
 - Separate worker containers or distributed services — deployment must stay as one app container plus mounted data volume.
-- Public web dashboard — Telegram is the presentation interface for v1.
+- Public web dashboard — Telegram is the presentation interface.
 - Paid travel booking, checkout, or operator account integration — the bot monitors and alerts; it does not book tours.
-- SQLite WAL mode / VACUUM scheduling — low-severity tech debt deferred to v2.
 
 ## Context
 
-v1.0 shipped 2026-05-03. v5.0 shipped 2026-05-04. 89 tests pass.
+All six milestones shipped (v1.0 — v5.1). 89 tests pass. No active phase.
 
 All concerns from initial planning are resolved:
-- ✓ `MonitorConfig` test construction in sync with fields (Phase 1)
-- ✓ URL allowlisting uses exact-domain `_ALLOWED_HOSTS` frozenset, not substring matching (Phase 2)
-- ✓ JSON persistence replaced with atomic SQLite writes (Phase 1)
-- ✓ Telegram access fails-secure when `TELEGRAM_CHAT_ID` unset (Phase 2)
-- Price history pruning: implemented (ANLY-02)
-- SQLite WAL mode: enabled (v4.0)
-- VACUUM scheduling: weekly (v4.0)
-- Legacy JSON path fields: removed from MonitorConfig (v4.0)
-- Telegram retry: 3 attempts with backoff (v4.0)
+- ✓ `MonitorConfig` test construction in sync with fields
+- ✓ URL allowlisting uses exact-domain `_ALLOWED_HOSTS` frozenset, not substring matching
+- ✓ JSON persistence replaced with atomic SQLite writes
+- ✓ Telegram access fails-secure when `TELEGRAM_CHAT_ID` unset
+- ✓ Price history pruning: implemented (v2.0)
+- ✓ SQLite WAL mode: enabled (v4.0)
+- ✓ VACUUM scheduling: weekly (v4.0)
+- ✓ Legacy JSON path fields: removed from MonitorConfig (v4.0)
+- ✓ Telegram retry: 3 attempts with backoff (v4.0)
 
 ## Constraints
 
@@ -92,4 +92,4 @@ All concerns from initial planning are resolved:
 | Generalize duration anomaly detection | Hardcoded 12/13-night comparison was brittle; `format_duration_anomalies` compares all pairs. | ✓ Confirmed — Phase 4 replaced `format_strong_diff_line` with generic pairwise comparator |
 
 ---
-*Last updated: 2026-05-03 after v1.0 milestone*
+*Last updated: 2026-05-06*

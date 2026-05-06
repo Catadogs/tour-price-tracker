@@ -19,18 +19,18 @@ progress:
 ## Project Reference
 
 **Core value:** The bot must reliably notify the admin when a desirable tour becomes worth acting on before the price changes or disappears.
-**Current focus:** v5.0 complete. AI recommendation engine + UI polish + auto-competitor search.
+**Current focus:** All milestones complete. AI recommendation engine + UI polish + auto-competitor search.
 
 ## Current Position
 
-Phase: 08-09 (recommendation + polish) — COMPLETE
+Phase: recommendation-and-polish — COMPLETE
 Status: 89 tests pass. All features integrated and running in container.
 
 Progress: [██████████] 100%
 
 ## v5.0 Features
 
-### Phase 08: AI Recommendation Engine
+### Recommendation Engine
 - 🤖 `_generate_recommendation_from_db` — buy/wait/hold verdict per hotel
 - Minimum 5 unique check timestamps required before giving verdict
 - Uses: current price, historical minimum, days to departure, USD/RUB trend
@@ -38,7 +38,7 @@ Progress: [██████████] 100%
 - 💵 Reference price setting — user sets expected price, shown in recommendation
 - Кнопка 🤖 Совет в главном меню и настройках
 
-### Phase 09: Report Polish
+### Report Polish
 - Links: Бронь→Смотреть, Забронировать→Посмотреть
 - Max 3 days in report, dates hidden if <10% price difference from previous
 - Missing nights (не найдено) removed from report

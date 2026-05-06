@@ -516,6 +516,7 @@ def test_settings_keyboard_structure():
         "add_filter", "clear_filters", "set_dates", "set_nights",
         "set_diff", "set_interval", "set_target", "clear_target",
         "set_retention", "anomaly_preset", "trend", "weekly", "recommend", "set_reference",
+        "set_price_alert",
     }
     assert callback_data_values == expected
 
@@ -1225,3 +1226,76 @@ def test_format_new_arrivals_combined():
     assert rooms is not None
     assert "Новые отели/номера" in rooms
     assert "Deluxe" in rooms
+
+
+def test_run_check_suppresses_when_below_threshold(tmp_path: Path, monkeypatch):
+    """When price_alert_threshold_pct > 0 and no price changed by >= threshold,
+    run_check returns empty string."""
+    from price_monitor.monitor import run_check, SearchTarget
+
+    html = """
+    <table>
+      <tr><td class="c_ns">Room A</td><td class="c_pe"><b class=r>285000</b><a href="/zaya?dt=14.09.2026&kol=12&otn=a" title="3500 USD">Buy</a></td></tr>
+    </table>
+    """
+
+    config = _make_bot_config(
+        db_path=tmp_path / "price_monitor.sqlite3",
+        price_alert_threshold_pct=10.0,
+        url="https://bgoperator.ru/search?data=14.09.2026&d2=16.09.2026",
+        departure_from="14.09.2026",
+        departure_to="16.09.2026",
+        nights=(12,),
+    )
+
+    from price_monitor.monitor import initialize_storage
+    initialize_storage(config)
+
+    monkeypatch.setattr("price_monitor.monitor.fetch_html", lambda url: html)
+    monkeypatch.setattr("price_monitor.monitor.load_search_targets", lambda c: [SearchTarget("test", c.url)])
+
+    msg1 = run_check(config)
+    assert msg1 != ""  # First run always sends
+
+    # Second run — price unchanged, should suppress
+    msg2 = run_check(config)
+    assert msg2 == ""  # No change => suppressed
+
+
+def test_run_check_sends_when_above_threshold(tmp_path: Path, monkeypatch):
+    """When price changes by >= threshold, message is sent."""
+    from price_monitor.monitor import run_check, SearchTarget
+
+    html1 = """
+    <table>
+      <tr><td class="c_ns">Room A</td><td class="c_pe"><b class=r>285000</b><a href="/zaya?dt=14.09.2026&kol=12&otn=a" title="3500 USD">Buy</a></td></tr>
+    </table>
+    """
+    html2 = """
+    <table>
+      <tr><td class="c_ns">Room A</td><td class="c_pe"><b class=r>250000</b><a href="/zaya?dt=14.09.2026&kol=12&otn=a" title="3100 USD">Buy</a></td></tr>
+    </table>
+    """
+
+    config = _make_bot_config(
+        db_path=tmp_path / "price_monitor.sqlite3",
+        price_alert_threshold_pct=10.0,
+        url="https://bgoperator.ru/search?data=14.09.2026&d2=16.09.2026",
+        departure_from="14.09.2026",
+        departure_to="16.09.2026",
+        nights=(12,),
+    )
+
+    from price_monitor.monitor import initialize_storage
+    initialize_storage(config)
+
+    monkeypatch.setattr("price_monitor.monitor.load_search_targets", lambda c: [SearchTarget("test", c.url)])
+
+    monkeypatch.setattr("price_monitor.monitor.fetch_html", lambda url: html1)
+    msg1 = run_check(config)
+    assert msg1 != ""
+
+    monkeypatch.setattr("price_monitor.monitor.fetch_html", lambda url: html2)
+    msg2 = run_check(config)
+    assert msg2 != ""
+    assert "Исторические минимумы" in msg2 or "📉" in msg2 or "упала" in msg2

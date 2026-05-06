@@ -67,6 +67,7 @@ class MonitorConfig:
     chart_interval_hours: int
     anomaly_preset: str  # "conservative" | "balanced" | "aggressive"
     state_path: Path | None = None
+    price_alert_threshold_pct: float = 0.0  # 0 = always send; >0 = suppress if no price changed by this %
     settings_path: Path | None = None
     history_path: Path | None = None
 
@@ -105,6 +106,7 @@ class MonitorConfig:
             price_history_retention_days=int(os.getenv("BG_PRICE_HISTORY_RETENTION_DAYS", "90")),
             chart_interval_hours=int(os.getenv("BG_CHART_INTERVAL_HOURS", "0")),
             anomaly_preset=os.getenv("BG_ANOMALY_PRESET", "balanced"),
+            price_alert_threshold_pct=float(os.getenv("BG_PRICE_ALERT_THRESHOLD_PCT", "0")),
         )
 
 
@@ -273,6 +275,9 @@ def effective_config(config: MonitorConfig) -> MonitorConfig:
             settings["price_history_retention_days"],
             int,
         )
+    if "price_alert_threshold_pct" in settings:
+        _apply_runtime_setting(updates, "price_alert_threshold_pct", settings["price_alert_threshold_pct"], float)
+
 
     config = replace(config, **updates)
 
@@ -1066,6 +1071,24 @@ def run_check(config: MonitorConfig) -> str:
     append_price_history(active_config, current_snapshot, ts)
     save_snapshot(active_config, current_snapshot)
 
+    # Price alert threshold gate: suppress if no price changed by >= threshold%
+    max_pct_change = 0.0
+    if active_config.price_alert_threshold_pct > 0 and previous_snapshot:
+        for identity, item in current_snapshot.items():
+            old = previous_snapshot.get(identity)
+            if old is None:
+                continue
+            try:
+                old_price = int(old["price_rub"])
+                new_price = int(item["price_rub"])
+                if old_price > 0:
+                    pct = abs(new_price - old_price) / old_price * 100
+                    if pct > max_pct_change:
+                        max_pct_change = pct
+            except (KeyError, ValueError, ZeroDivisionError):
+                pass
+
+
     target_alerts = (
         format_target_alerts(current_snapshot, active_config.target_price_rub)
         if active_config.target_price_rub
@@ -1105,6 +1128,17 @@ def run_check(config: MonitorConfig) -> str:
         alerts.append(new_hotels_block)
     if changes:
         alerts.append(f"🔔 *Изменения с прошлой проверки*\n{changes}")
+
+    # Suppress message if threshold is set and no price changed enough and no alerts
+    if active_config.price_alert_threshold_pct > 0 and previous_snapshot:
+        if max_pct_change < active_config.price_alert_threshold_pct and not alerts:
+            logging.info(
+                "Suppressing report: max price change %.1f%% < threshold %.1f%%, no alerts",
+                max_pct_change,
+                active_config.price_alert_threshold_pct,
+            )
+            return ""
+
 
     message = report if not alerts else f"{report}\n\n" + "\n\n".join(alerts)
     logging.info("Price check finished: %s search(es), %s offer(s)", len(reports), len(current_snapshot))
@@ -1259,6 +1293,14 @@ class TelegramControlBot:
                 chat_id,
                 "Отправь частоту проверки: 30m, 1h, 6h или число секунд.",
             )
+        elif data == "set_price_alert":
+            self.pending[chat_id] = "set_price_alert"
+            self.send_message(
+                chat_id,
+                "Отправь порог изменения цены в % (например: 10).\n"
+                "Бот будет слать отчёт только если цена изменилась на этот % или больше.\n"
+                "Отправь 0 чтобы отключить фильтр.",
+            )
         elif data == "set_nights":
             self.pending[chat_id] = "set_nights"
             self.send_message(chat_id, "Отправь список ночей, например: 12,13")
@@ -1336,6 +1378,20 @@ class TelegramControlBot:
                 settings["strong_diff_percent"] = percent
                 save_runtime_settings(self.config, settings)
                 self.send_message(chat_id, f"Порог разницы 12/13 сохранен: {rub} RUB или {percent}%", reply_markup=main_keyboard())
+            elif action == "set_price_alert":
+                try:
+                    threshold = float(text.replace(",", ".").strip())
+                    if threshold < 0:
+                        raise ValueError
+                except ValueError:
+                    self.send_message(chat_id, "Отправь число (например: 10). 0 = отключить.", reply_markup=main_keyboard())
+                    return
+                settings["price_alert_threshold_pct"] = threshold
+                save_runtime_settings(self.config, settings)
+                if threshold == 0:
+                    self.send_message(chat_id, "Порог алерта отключен — бот будет слать все отчёты.", reply_markup=main_keyboard())
+                else:
+                    self.send_message(chat_id, f"Порог алерта сохранен: {threshold}%\nБот будет слать отчёт только при изменении цены на {threshold}% или больше.", reply_markup=main_keyboard())
             elif action == "set_interval":
                 interval_seconds = parse_interval_text(text)
                 settings["interval_seconds"] = interval_seconds
@@ -1469,6 +1525,9 @@ def settings_keyboard() -> dict[str, object]:
                 {"text": "Частота проверки", "callback_data": "set_interval"},
             ],
             [
+                {"text": "🔕 Порог алерта", "callback_data": "set_price_alert"},
+            ],
+            [
                 {"text": "🎯 Целевая цена", "callback_data": "set_target"},
                 {"text": "Сбросить цель", "callback_data": "clear_target"},
             ],
@@ -1510,6 +1569,7 @@ def format_settings(config: MonitorConfig) -> str:
         f"или >= {config.strong_diff_percent}%\n"
         f"Пресет аномалий: {preset_label}\n"
         f"Хранение истории: {config.price_history_retention_days} дн.\n"
+        f"Порог алерта: {'отключен' if config.price_alert_threshold_pct == 0 else f'{config.price_alert_threshold_pct}%'}\n"
         f"Частота проверки: {format_interval(config.interval_seconds)}\n"
         f"Целевая цена: {target_str}\n"
         f"Ориентир цены: {ref_str}\n"
@@ -1995,7 +2055,8 @@ def main() -> int:
         try:
             with check_lock:
                 message = run_check(config)
-            send_telegram(effective_config(config), message)
+            if message:
+                send_telegram(effective_config(config), message)
         except Exception:
             logging.exception("Price check failed")
             if config.run_once:
