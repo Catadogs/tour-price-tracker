@@ -1561,7 +1561,7 @@ def format_comparison(groups: list[HotelGroup]) -> str | None:
     lines: list[str] = ["🌐 *Сравнение цен*"]
 
     for group in groups:
-        lines.append(f"\n🏩 *{group.hotel_name}*")
+        lines.append(f"\n🏩 `{group.hotel_name}`")
         for r in group.results:
             icon = provider_icons.get(r.provider, "⚪")
 
@@ -1600,11 +1600,11 @@ def format_cross_search_comparison(
         overall = find_overall_best(r.best_by_date) if r.best_by_date else None
         if overall:
             lines.append(
-                f"  • *{hotel}*: {format_rub(overall.price_rub)} "
+                f"  • `{hotel}`: {format_rub(overall.price_rub)} "
                 f"({overall.departure_date}, {overall.nights}н)"
             )
         else:
-            lines.append(f"  • *{hotel}*: нет предложений")
+            lines.append(f"  • `{hotel}`: нет предложений")
 
     return "\n".join(lines)
 
