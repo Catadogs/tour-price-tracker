@@ -91,7 +91,10 @@ def fetch_min_prices(
 
 
 def format_sletat_comparison(api_result: dict[str, Any], date_from: str, date_to: str) -> str | None:
-    """Format Sletat price comparison for Telegram."""
+    """Format Sletat price comparison for Telegram.
+
+    date_from/to are ISO format: "2026-09-14"
+    """
     if "error" in api_result:
         return None
 
@@ -108,8 +111,8 @@ def format_sletat_comparison(api_result: dict[str, Any], date_from: str, date_to
     target_dates = set()
     from datetime import datetime, timedelta
     try:
-        d = datetime.strptime(date_from, "%d.%m.%Y")
-        end = datetime.strptime(date_to, "%d.%m.%Y")
+        d = datetime.strptime(date_from, "%Y-%m-%d")
+        end = datetime.strptime(date_to, "%Y-%m-%d")
         while d <= end:
             target_dates.add(d.strftime("%Y-%m-%d"))
             d += timedelta(days=1)
@@ -130,7 +133,7 @@ def format_sletat_comparison(api_result: dict[str, Any], date_from: str, date_to
                 f"({item.get('sourceName', '?')})".replace(",", " ")
             )
     else:
-        lines.append(f"\nНа {date_from}—{date_to} данные не найдены\\.")
+        lines.append(f"\nНа {date_from} — {date_to} данные не найдены\\.")
         # Show nearest dates with prices
         all_prices = [(item["date"], item["price"], item.get("sourceName", "?"))
                        for bucket in data for item in bucket if item.get("price")]

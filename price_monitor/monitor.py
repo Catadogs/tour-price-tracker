@@ -1089,14 +1089,17 @@ def run_check(config: MonitorConfig) -> str:
 
     # Sletat.ru multi-operator comparison
     try:
+        # Convert dates from dd.mm.yyyy to yyyy-mm-dd for Sletat API
+        sl_from = parse_ru_date(active_config.departure_from).strftime("%Y-%m-%d")
+        sl_to = parse_ru_date(active_config.departure_to).strftime("%Y-%m-%d")
         sl_data = sletat.fetch_min_prices(
-            active_config.departure_from,
-            active_config.departure_to,
+            sl_from,
+            sl_to,
             nights_min=min(active_config.nights),
             nights_max=max(active_config.nights),
         )
         sl_text = sletat.format_sletat_comparison(
-            sl_data, active_config.departure_from, active_config.departure_to
+            sl_data, sl_from, sl_to
         )
         if sl_text:
             report = f"{report}\n\n{sl_text}"
